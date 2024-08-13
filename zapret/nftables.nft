@@ -1,0 +1,73 @@
+#!/usr/sbin/nft -f
+# vim: set expandtab ts=2 sw=2 ai
+
+flush ruleset
+
+include "/config/nftables.nft"
+
+table inet zapret {
+  chain postnat {
+    type filter hook postrouting priority srcnat + 1; policy accept;
+
+    oifname != lo tcp dport $TCP_PORTS ct original packets 1-6 meta mark & $DESYNC_MARK == 0x00000000 meta mark set meta mark | $DESYNC_MARK_POSTNAT queue flags bypass to $NFQ_TCP
+    oifname != lo udp dport $UDP_PORTS ct original packets 1-6 meta mark & $DESYNC_MARK == 0x00000000 meta mark set meta mark | $DESYNC_MARK_POSTNAT queue flags bypass to $NFQ_UDP
+  }
+
+  chain prerouting {
+    type filter hook prerouting priority dstnat + 1; policy accept;
+  }
+
+  chain prenat {
+    type filter hook prerouting priority dstnat - 1; policy accept;
+
+    iifname != lo tcp sport $TCP_PORTS ct reply packets 1-6 queue flags bypass to $NFQ_TCP
+  }
+
+  chain predefrag {
+    type filter hook output priority -401; policy accept;
+    meta mark & $DESYNC_MARK == $DESYNC_MARK jump predefrag_nfqws comment "nfqws generated : avoid drop by INVALID conntrack state"
+  }
+
+  chain predefrag_nfqws {
+    meta mark & $DESYNC_MARK_POSTNAT == $DESYNC_MARK_POSTNAT notrack comment "postnat traffic"
+    ip frag-off != 0x0 notrack comment "ipfrag"
+    exthdr frag exists notrack comment "ipfrag"
+    tcp flags ! syn,rst,ack notrack comment "datanoack"
+  }
+}
+
+table ip nat {
+  map dnsmap {
+    type ipv4_addr : ipv4_addr ;
+  }
+
+  chain dnsmap {
+    counter \
+      meta mark set meta mark | $DNSMAP_MARK \
+      dnat to ip daddr map @dnsmap \
+      comment "dnat known dnsmap entries"
+  }
+
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+
+    counter goto dnsmap \
+      comment "process dnsmap addresses"
+  }
+
+  chain output {
+    type nat hook output priority dstnat; policy accept;
+
+    ip daddr $DNSMAP_RANGE \
+      counter goto dnsmap \
+      comment "process dnsmap addresses"
+  }
+
+  chain postrouting {
+    type nat hook postrouting priority srcnat; policy accept;
+
+    meta mark & $DNSMAP_MARK == $DNSMAP_MARK \
+      counter masquerade \
+      comment "masquerade outgoing traffic"
+  }
+}

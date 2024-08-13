@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  dnsmap:
+    image:  ghcr.io/stek29/spoofskipper/dnsmap:1055eab2de3bc299f57b8c9e16747657a46e4763
+    build:
+      context: ./dnsmap
+      args:
+        REVISION: 1055eab2de3bc299f57b8c9e16747657a46e4763
+    entrypoint: /dnsmap
+    command:
+      - -config
+      - /config/dnsmap.json
+    restart: unless-stopped
+    network_mode: service:zapret
+    # so it will be killed on zapret restart to force nftables reload
+    pid: service:zapret
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config:/config:ro
+
+  zapret:
+    image: ghcr.io/stek29/spoofskipper/zapret:c369f11638f59f9434132056b8be9f1a9603c418
+    build:
+      context: ./zapret
+      args:
+        REVISION: c369f11638f59f9434132056b8be9f1a9603c418
+    command: "/config/zapret.sh"
+    restart: unless-stopped
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config:/config:ro
+
