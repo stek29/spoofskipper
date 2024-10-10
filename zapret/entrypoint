@@ -8,6 +8,10 @@ killall dnsmap || :
 # shellcheck source=../config/zapret.sh
 source "$1"
 
+if [ -n "${ZAPRET_PRERUN:-}" ]; then
+  eval "${ZAPRET_PRERUN}"
+fi
+
 for cmd in "${NFQWS_INSTANCES[@]}"; do
   echo "starting: $cmd"
   eval nfqws "$cmd" &

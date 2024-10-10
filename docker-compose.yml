@@ -27,6 +27,7 @@ services:
         REVISION: a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
     environment: {}
     #   NFQWS_DEFAULT_ARGS: '--debug' # example
+    #   ZAPRET_PRERUN: 'ip r add default via 127.1.2.3'
     command: "/config/zapret.sh"
     restart: unless-stopped
     privileged: true
