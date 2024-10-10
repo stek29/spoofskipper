@@ -1,6 +1,12 @@
 FROM --platform=${TARGETPLATFORM} alpine:latest
 LABEL maintainer="V2Fly Community <dev@v2fly.org>"
 
+RUN apk add --no-cache \
+    nftables \
+    bash \
+    iproute2 \
+    ;
+
 WORKDIR /tmp
 ARG TARGETPLATFORM
 ARG TAG
