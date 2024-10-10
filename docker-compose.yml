@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   dnsmap:
     image:  ghcr.io/stek29/spoofskipper/dnsmap:1055eab2de3bc299f57b8c9e16747657a46e4763
