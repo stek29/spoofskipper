@@ -1,0 +1,18 @@
+services:
+  .dnsmap:
+    deploy:
+      replicas: 0
+    image: ghcr.io/stek29/spoofskipper/dnsmap:1055eab2de3bc299f57b8c9e16747657a46e4763
+    build:
+      context: ./dnsmap
+      args:
+        REVISION: 1055eab2de3bc299f57b8c9e16747657a46e4763
+
+  .zapret:
+    image: ghcr.io/stek29/spoofskipper/zapret:a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
+    build:
+      context: ./zapret
+      args:
+        REVISION: a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
+    deploy:
+      replicas: 0
