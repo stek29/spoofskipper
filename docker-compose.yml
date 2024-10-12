@@ -28,3 +28,35 @@ services:
     volumes:
       - ./config:/config:ro
 
+  v2fly-tun:
+    image: ghcr.io/stek29/spoofskipper/v2fly:v5.20.0
+    volumes:
+      - ./config/v2fly:/config:ro
+    environment:
+      CONFIG_PATH: '/config/config.json'
+    entrypoint: ['/bin/sh']
+    command:
+      - -c
+      - >-
+        /config/start.sh ;
+        exec /usr/bin/v2ray run -c "$${CONFIG_PATH}" -format jsonv5
+    restart: unless-stopped
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+  dnsmap-v2fly-tun:
+    image: ghcr.io/stek29/spoofskipper/dnsmap:1055eab2de3bc299f57b8c9e16747657a46e4763
+    command:
+      - -config
+      - /config/dnsmap.json
+    restart: unless-stopped
+    network_mode: service:v2fly-tun
+    # so it will be killed on v2fly-tun restart to force nftables reload
+    pid: service:v2fly-tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config/v2fly:/config:ro

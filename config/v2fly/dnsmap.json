@@ -1,0 +1,23 @@
+{
+    "log": {
+        "query": false,
+        "answer": false
+    },
+    "upstream": {
+        "address": "8.8.8.8:53",
+        "net": "tcp"
+    },
+    "listen": {
+        "address": "0.0.0.0:53",
+        "udp": true,
+        "tcp": true
+    },
+    "remap": {
+        "range": "10.206.0.0/20",
+        "nftables": {
+            "table": "nat",
+            "map": "dnsmap",
+            "clear": false
+        }
+    }
+}

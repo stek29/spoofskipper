@@ -1,0 +1,5 @@
+#!/usr/sbin/nft -f
+# vim: set expandtab ts=2 sw=2 ai
+
+define DNSMAP_RANGE = 10.206.0.0/20;
+define DNSMAP_MARK  = 0x4;
