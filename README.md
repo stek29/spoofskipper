@@ -110,6 +110,12 @@ route `fakeip` and `dnsmap` ranges for corresponding containers on your network 
 ### run
 just normal docker compose
 
+build images first -- they're not in registry yet:
+```sh
+docker compose -f docker-compose.build.yml build
+```
+
+then run:
 ```sh
 docker compose up -d
 ```
