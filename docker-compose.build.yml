@@ -16,14 +16,3 @@ services:
         REVISION: a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
     deploy:
       replicas: 0
-
-  .v2fly:
-    deploy:
-      replicas: 0
-    image: ghcr.io/stek29/spoofskipper/v2fly:v5.20.0
-    build:
-      context: ./v2fly/image
-      args:
-        TARGETPLATFORM: linux/arm64
-        TAG: v5.20.0
-
