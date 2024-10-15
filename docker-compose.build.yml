@@ -16,3 +16,12 @@ services:
         REVISION: a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
     deploy:
       replicas: 0
+
+  .sing-box:
+    image: ghcr.io/stek29/spoofskipper/sing-box:v1.10.0-rc.1
+    build:
+      context: ./sing-box
+      args:
+        REVISION: v1.10.0-rc.1
+    deploy:
+      replicas: 0

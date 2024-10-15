@@ -27,3 +27,14 @@ services:
       - NET_RAW
     volumes:
       - ./config:/config:ro
+
+  sing-tun:
+    image: ghcr.io/stek29/spoofskipper/sing-box:v1.10.0-rc.1
+    volumes:
+      - ./config/sing:/config:ro
+    command: ['run', '-c', '/tmp/sing.json']
+    restart: unless-stopped
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
