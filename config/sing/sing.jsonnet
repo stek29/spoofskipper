@@ -1,6 +1,8 @@
 local user_config = import 'config.jsonnet';
 
 local default_config = {
+  // logging settings -- keep default
+  log: {},
   // default dns server to use
   default_dns: {
     address: '77.88.8.8',
@@ -98,9 +100,7 @@ local zapret_rule_sets = std.sort(config.zapret_rule_sets + geosite_tags(config.
 local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
 
 {
-  log: {
-    level: 'debug',
-  },
+  log: config.log,
   dns: {
     servers: [
       config.default_dns {
