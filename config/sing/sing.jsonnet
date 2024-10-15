@@ -76,6 +76,15 @@ local default_config = {
       download_detour: 'direct',
     },
   ],
+
+  // cache settings
+  cache_file: {
+    enabled: true,
+    path: '/data/cache.db',
+    store_fakeip: true,
+    store_rdrc: true,
+    rdrc_timeout: '1h',
+  },
 };
 
 local config = default_config + user_config;
@@ -201,5 +210,8 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
     ],
     rule_set: config.extra_rule_sets + geosite_rule_sets,
     auto_detect_interface: true,
+  },
+  experimental: {
+    cache_file: config.cache_file,
   },
 }
