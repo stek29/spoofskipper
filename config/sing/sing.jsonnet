@@ -10,6 +10,11 @@ local default_config = {
     address: '8.8.8.8',
   },
 
+  // settings for tun inbound
+  tun: {
+    inet4_address: '172.19.0.1/30',
+  },
+
   // settings for the dns server inbound
   dns_server: {
     listen: '0.0.0.0',
@@ -151,11 +156,9 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
     independent_cache: true,
   },
   inbounds: [
-    {
+    config.tun {
       type: 'tun',
       tag: 'tun',
-      inet4_address: '172.19.0.1/30',
-      inet6_address: 'fdfe:dcba:9876::1/126',
       auto_route: true,
       strict_route: true,
     },
