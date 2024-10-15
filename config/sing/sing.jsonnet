@@ -12,6 +12,11 @@ local default_config = {
     address: '8.8.8.8',
   },
 
+  // define additional dns servers
+  extra_dns_servers: [],
+  // additional dns.rules: after zapret/antizapret, just before default
+  extra_dns_rules: [],
+
   // settings for tun inbound
   tun: {
     inet4_address: '172.19.0.1/30',
@@ -128,7 +133,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
         tag: 'block',
         address: 'rcode://success',
       },
-    ],
+    ] + config.extra_dns_servers,
     rules: [
       {
         server: 'block',
@@ -155,6 +160,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
         outbound: 'any',
         server: 'default',
       },
+    ] + config.extra_dns_rules + [
       {
         server: 'default',
       },
