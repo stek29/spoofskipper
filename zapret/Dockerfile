@@ -7,7 +7,7 @@ RUN apk add --no-cache \
     ;
 
 ENV ZAPRET_DIR=/opt/zapret
-ARG REVISION=master
+ARG REVISION
 
 # Download archive and extract only needed files:
 #  - binary of nfqws for matching platform
@@ -15,7 +15,7 @@ ARG REVISION=master
 RUN set -e \
     ; apk add --no-cache curl tar \
     ; mkdir -p "${ZAPRET_DIR}" ; cd "${ZAPRET_DIR}" \
-    ; curl -L "https://github.com/bol-van/zapret/archive/${REVISION}.tar.gz" | \
+    ; curl -L "https://github.com/bol-van/zapret/releases/download/${REVISION}/zapret-${REVISION}.tar.gz" | \
         tar xzf - --strip-components=1 --wildcards \
             '*/files/fake' \
             '*'/"binaries/$(uname -m)/nfqws" \

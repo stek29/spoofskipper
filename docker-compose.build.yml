@@ -9,11 +9,11 @@ services:
         REVISION: 69bc1e0ee4c65738e0b6885fbb23fc1581630974
 
   .zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
+    image: ghcr.io/stek29/spoofskipper/zapret:v69.5
     build:
       context: ./zapret
       args:
-        REVISION: a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
+        REVISION: v69.5
     deploy:
       replicas: 0
 

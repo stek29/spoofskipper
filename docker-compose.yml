@@ -15,7 +15,7 @@ services:
       - ./config:/config:ro
 
   zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:a2c0f81457d87acac30c49fb9ed8a06fb1ea60e0
+    image: ghcr.io/stek29/spoofskipper/zapret:v69.5
     environment: {}
     #   NFQWS_DEFAULT_ARGS: '--debug' # example
     #   ZAPRET_PRERUN: 'ip r add default via 127.1.2.3'
