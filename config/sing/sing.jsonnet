@@ -90,6 +90,9 @@ local default_config = {
     store_rdrc: true,
     rdrc_timeout: '1h',
   },
+
+  // clash api disabled by default
+  clash_api: {},
 };
 
 local config = default_config + user_config;
@@ -219,5 +222,6 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
   },
   experimental: {
     cache_file: config.cache_file,
+    clash_api: config.clash_api,
   },
 }
