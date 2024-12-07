@@ -18,7 +18,7 @@ services:
       replicas: 0
 
   .sing-box:
-    image: ghcr.io/stek29/spoofskipper/sing-box:v1.10.1
+    image: ghcr.io/stek29/spoofskipper/sing-box:v1.10.3
     build:
       context: ./sing-box
       args:
