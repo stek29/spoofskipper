@@ -156,6 +156,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
       {
         // block HTTPS and SVCB records for domains which need to be hijacked
         server: 'block',
+        disable_cache: true,
         query_type: ['SVCB', 'HTTPS'],
         rule_set: hijack_rule_sets,
       },
