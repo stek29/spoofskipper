@@ -160,12 +160,9 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
         query_type: ['SVCB', 'HTTPS'],
         rule_set: hijack_rule_sets,
       },
-      {
-        outbound: 'any',
-        server: 'default',
-      },
     ] + config.extra_dns_rules + [
       {
+        outbound: 'any',
         server: 'default',
       },
     ],
