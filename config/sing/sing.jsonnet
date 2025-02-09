@@ -189,20 +189,17 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
       type: 'direct',
       tag: 'direct',
     },
-    {
-      type: 'dns',
-      tag: 'dns-out',
-    },
   ],
   route: {
     rules: [
       {
         inbound: 'dns-server',
-        outbound: 'dns-out',
+        action: 'sniff',
       },
       {
+        inbound: 'dns-server',
         protocol: 'dns',
-        outbound: 'dns-out',
+        action: 'hijack-dns',
       },
       {
         geoip: [
