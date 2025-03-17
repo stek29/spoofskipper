@@ -29,12 +29,14 @@ local default_config = {
   },
 
   // always block
-  // these are blocked to stop apple private dns/private relay
+  // these are blocked to stop apple private dns/private relay,
+  // and to stop firefox DoH
   blocked_domains: [
     'mask.icloud.com',
     'mask-h2.icloud.com',
     'mask-canary.icloud.com',
     'mask.apple-dns.net',
+    'use-application-dns.net',
   ],
 
   fakeip_ttl: 300,
