@@ -12,9 +12,14 @@ if [ -n "${ZAPRET_PRERUN:-}" ]; then
   eval "${ZAPRET_PRERUN}"
 fi
 
-for cmd in "${NFQWS_INSTANCES[@]}"; do
-  echo "starting: $cmd"
-  eval nfqws "$cmd" &
+combined_cmd="${NFQWS_ARGS[*]}"
+for i in "${!NFQWS_INSTANCES[@]}"; do
+  cmd="${NFQWS_INSTANCES[$i]}"
+  if [ "$i" -gt 0 ]; then
+    combined_cmd+=" --new"
+  fi
+  combined_cmd+=" $cmd"
 done
 
-wait
+echo "starting: nfqws $combined_cmd"
+eval exec nfqws '%s' "$combined_cmd"

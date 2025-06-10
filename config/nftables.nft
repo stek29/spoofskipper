@@ -4,11 +4,10 @@
 define DESYNC_MARK=0x40000000;
 define DESYNC_MARK_POSTNAT=0x20000000;
 
-define NFQ_TCP = 200;
-define NFQ_UDP = 210;
+define NFQ_NUM = 200;
 
 define TCP_PORTS = { 80, 443 };
-define UDP_PORTS = { 443 };
+define UDP_PORTS = { 443, 50000-50100 };
 
 define DNSMAP_RANGE = 10.205.0.0/21;
 define DNSMAP_MARK = 0x2;
