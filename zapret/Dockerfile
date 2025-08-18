@@ -13,13 +13,14 @@ ARG REVISION
 #  - binary of nfqws for matching platform
 #  - binary fake files
 RUN set -e \
+    ; archdir="linux-$(uname -m | sed 's/aarch64/arm64/')" \
     ; apk add --no-cache curl tar \
     ; mkdir -p "${ZAPRET_DIR}" ; cd "${ZAPRET_DIR}" \
     ; curl -L "https://github.com/bol-van/zapret/releases/download/${REVISION}/zapret-${REVISION}.tar.gz" | \
         tar xzf - --strip-components=1 --wildcards \
             '*/files/fake' \
-            '*'/"binaries/$(uname -m)/nfqws" \
-    ; ln -s "${ZAPRET_DIR}/binaries/$(uname -m)/nfqws" /bin/nfqws \
+            '*'/"binaries/${archdir}/nfqws" \
+    ; ln -s "${ZAPRET_DIR}/binaries/${archdir}/nfqws" /bin/nfqws \
     ; apk del curl tar
     
 COPY ./nftables.nft ./entrypoint /
