@@ -48,6 +48,19 @@ local default_config = {
     inet6_range: 'fc00::/18',
   },
 
+
+  // extra route rules: applied before default tun outbound rule
+  extra_route_rules: [
+    // {
+    //   inbound: 'tun',
+    //   outbound: 'some-other-outbound',
+    //   // domain matching will only work for fakeip domains since sniff is explicity disabled
+    //   domain: [
+    //     'example.com',
+    //   ],
+    // },
+  ],
+
   // outbound to use for tun traffic
   tun_outbound: 'direct',
   // extra outbounds
@@ -183,24 +196,27 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
   ],
   route: {
     rules: [
-      {
-        inbound: 'dns-server',
-        action: 'sniff',
-      },
-      {
-        inbound: 'dns-server',
-        protocol: 'dns',
-        action: 'hijack-dns',
-      },
-      {
-        ip_is_private: true,
-        outbound: 'direct',
-      },
-      {
-        inbound: 'tun',
-        outbound: config.tun_outbound,
-      },
-    ],
+             {
+               inbound: 'dns-server',
+               action: 'sniff',
+             },
+             {
+               inbound: 'dns-server',
+               protocol: 'dns',
+               action: 'hijack-dns',
+             },
+             {
+               ip_is_private: true,
+               outbound: 'direct',
+             },
+           ]
+           + config.extra_route_rules +
+           [
+             {
+               inbound: 'tun',
+               outbound: config.tun_outbound,
+             },
+           ],
     rule_set: config.extra_rule_sets + geosite_rule_sets,
     auto_detect_interface: true,
     default_domain_resolver: {
