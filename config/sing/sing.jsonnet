@@ -199,6 +199,11 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
       {
         inbound: 'tun',
         outbound: config.tun_outbound,
+        // TODO: allow multiple fakeip ranges with smart routing
+        // ip_cidr: [
+        //   config.fakeip_dns.inet4_range,
+        //   config.fakeip_dns.inet6_range,
+        // ],
       },
     ],
     rule_set: config.extra_rule_sets + geosite_rule_sets,
