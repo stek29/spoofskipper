@@ -5,11 +5,13 @@ local default_config = {
   log: {},
   // default dns server to use
   default_dns: {
-    address: '77.88.8.8',
+    type: 'udp',
+    server: '77.88.8.8',
   },
   // dns server address of zapret's dnsmap
   zapret_dns: {
-    address: '8.8.8.8',
+    type: 'udp',
+    server: '8.8.8.8',
   },
 
   // define additional dns servers
@@ -41,7 +43,7 @@ local default_config = {
 
   fakeip_ttl: 300,
 
-  fakeip_ranges: {
+  fakeip_dns: {
     inet4_range: '10.206.0.0/20',
     inet6_range: 'fc00::/18',
   },
@@ -124,24 +126,19 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
     servers: [
       config.default_dns {
         tag: 'default',
-        detour: 'direct',
       },
       config.zapret_dns {
         tag: 'zapret',
-        detour: 'direct',
       },
-      {
+      config.fakeip_dns {
         tag: 'fakeip',
-        address: 'fakeip',
-      },
-      {
-        tag: 'block',
-        address: 'rcode://success',
+        type: 'fakeip',
       },
     ] + config.extra_dns_servers,
     rules: [
       {
-        server: 'block',
+        action: 'predefined',
+        rcode: 'NOERROR',
         domain: config.blocked_domains,
       },
       {
@@ -157,20 +154,12 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
       },
       {
         // block HTTPS and SVCB records for domains which need to be hijacked
-        server: 'block',
-        disable_cache: true,
+        action: 'predefined',
+        rcode: 'NOERROR',
         query_type: ['SVCB', 'HTTPS'],
         rule_set: hijack_rule_sets,
       },
-    ] + config.extra_dns_rules + [
-      {
-        outbound: 'any',
-        server: 'default',
-      },
-    ],
-    fakeip: config.fakeip_ranges {
-      enabled: true,
-    },
+    ] + config.extra_dns_rules,
     independent_cache: true,
   },
   inbounds: [
@@ -204,9 +193,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
         action: 'hijack-dns',
       },
       {
-        geoip: [
-          'private',
-        ],
+        ip_is_private: true,
         outbound: 'direct',
       },
       {
@@ -216,6 +203,9 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
     ],
     rule_set: config.extra_rule_sets + geosite_rule_sets,
     auto_detect_interface: true,
+    default_domain_resolver: {
+      server: 'default',
+    },
   },
   experimental: {
     cache_file: config.cache_file,
