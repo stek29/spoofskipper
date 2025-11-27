@@ -9,5 +9,5 @@ define NFQ_NUM = 200;
 define TCP_PORTS = { 80, 443 };
 define UDP_PORTS = { 443, 50000-50100 };
 
-define DNSMAP_RANGE = 10.205.0.0/21;
+define DNSMAP_RANGE = 48.0.16.0/22;
 define DNSMAP_MARK = 0x2;
