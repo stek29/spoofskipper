@@ -9,8 +9,8 @@ table inet zapret {
   chain postnat {
     type filter hook postrouting priority srcnat + 1; policy accept;
 
-    oifname != lo tcp dport $TCP_PORTS ct original packets 1-6 meta mark & $DESYNC_MARK == 0x00000000 meta mark set meta mark | $DESYNC_MARK_POSTNAT queue flags bypass to $NFQ_NUM
-    oifname != lo udp dport $UDP_PORTS ct original packets 1-6 meta mark & $DESYNC_MARK == 0x00000000 meta mark set meta mark | $DESYNC_MARK_POSTNAT queue flags bypass to $NFQ_NUM
+    oifname != lo tcp dport $TCP_PORTS ct original packets 1-6 meta mark & $DESYNC_MARK == 0x00000000 counter meta mark set meta mark | $DESYNC_MARK_POSTNAT queue flags bypass to $NFQ_NUM
+    oifname != lo udp dport $UDP_PORTS ct original packets 1-6 meta mark & $DESYNC_MARK == 0x00000000 counter meta mark set meta mark | $DESYNC_MARK_POSTNAT queue flags bypass to $NFQ_NUM
   }
 
   chain prerouting {
