@@ -23,6 +23,49 @@ def stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def deep_merge(base: Any, override: Any) -> Any:
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = {key: value for key, value in base.items()}
+        for key, value in override.items():
+            if key in merged:
+                merged[key] = deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+    return override
+
+
+def validate_mapping(value: Any, path: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise SystemExit(f"{path} must be a JSON object")
+    return value
+
+
+def apply_outbound_settings(
+    output: dict[str, Any],
+    global_settings: dict[str, Any],
+    type_settings: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    configured_outbounds: list[dict[str, Any]] = []
+    for outbound in output.get("outbounds", []):
+        if not isinstance(outbound, dict):
+            raise SystemExit("generated outbound must be a JSON object")
+
+        outbound_type = outbound.get("type")
+        if not isinstance(outbound_type, str) or not outbound_type:
+            raise SystemExit("generated outbound must include a non-empty string type")
+
+        merged = deep_merge(global_settings, validate_mapping(type_settings.get(outbound_type), f"outbound_settings.types.{outbound_type}"))
+        configured_outbounds.append(deep_merge(merged, outbound))
+
+    return {
+        "outbounds": configured_outbounds,
+        "groups": output.get("groups", {}),
+    }
+
+
 def merge_outputs(outputs: list[dict[str, Any]]) -> dict[str, Any]:
     merged_outbounds: list[dict[str, Any]] = []
     seen_outbounds: dict[str, str] = {}
@@ -75,11 +118,25 @@ def main() -> int:
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
+    outbound_settings = validate_mapping(config.get("outbound_settings"), "outbound_settings")
+    global_outbound_settings = validate_mapping(outbound_settings.get("global"), "outbound_settings.global")
+    raw_type_settings = validate_mapping(outbound_settings.get("types"), "outbound_settings.types")
+    type_outbound_settings = {
+        outbound_type: validate_mapping(settings, f"outbound_settings.types.{outbound_type}")
+        for outbound_type, settings in raw_type_settings.items()
+    }
     subscriptions = config.get("subscriptions")
     if not isinstance(subscriptions, list) or not subscriptions:
         raise SystemExit("config must include a non-empty subscriptions array")
 
-    outputs = [render_subscription(spec) for spec in subscriptions]
+    outputs = [
+        apply_outbound_settings(
+            render_subscription(spec),
+            global_outbound_settings,
+            type_outbound_settings,
+        )
+        for spec in subscriptions
+    ]
     json.dump(merge_outputs(outputs), sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0
