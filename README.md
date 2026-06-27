@@ -110,12 +110,26 @@ route `fakeip` and `dnsmap` ranges for corresponding containers on your network 
 ### run
 just normal docker compose
 
-build images first -- they're not in registry yet:
+images are built and published to GHCR from the pinned versions in `.env`.
+Each image uses a tag made from the upstream revision and the local package version:
+
+```sh
+REVISION_ZAPRET=v72.12
+VERSION_ZAPRET=1
+# ghcr.io/stek29/spoofskipper/zapret:v72.12-1
+```
+
+Bump the matching `VERSION_*` when changing the local Dockerfile or entrypoint for an image.
+Bump the matching `REVISION_*` when updating the upstream component, and reset or bump `VERSION_*`
+as appropriate. The GitHub Actions workflow runs on `.env` changes on `master` and only builds
+image tags that are not already present in GHCR.
+
+To build images locally instead:
 ```sh
 docker compose -f docker-compose.build.yml build
 ```
 
-then run:
+Run:
 ```sh
 docker compose up -d
 ```

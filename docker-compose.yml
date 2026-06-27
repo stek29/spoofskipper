@@ -1,6 +1,6 @@
 services:
   dnsmap:
-    image: ghcr.io/stek29/spoofskipper/dnsmap:$REVISION_DNSMAP
+    image: ghcr.io/stek29/spoofskipper/dnsmap:$REVISION_DNSMAP-$VERSION_DNSMAP
     command:
       - -config
       - /config/dnsmap.json
@@ -15,7 +15,7 @@ services:
       - ./config:/config:ro
 
   zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET
+    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$VERSION_ZAPRET
     environment: {}
     #   NFQWS_DEFAULT_ARGS: '--debug' # example
     #   ZAPRET_PRERUN: 'ip r add default via 127.1.2.3'
@@ -29,7 +29,7 @@ services:
       - ./config:/config:ro
 
   sing-tun:
-    image: ghcr.io/stek29/spoofskipper/sing-box:$REVISION_SINGBOX
+    image: ghcr.io/stek29/spoofskipper/sing-box:$REVISION_SINGBOX-$VERSION_SINGBOX
     volumes:
       - ./config/sing:/config:ro
       - ./data:/data:rw

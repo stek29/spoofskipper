@@ -2,14 +2,14 @@ services:
   .dnsmap:
     deploy:
       replicas: 0
-    image: ghcr.io/stek29/spoofskipper/dnsmap:$REVISION_DNSMAP
+    image: ghcr.io/stek29/spoofskipper/dnsmap:$REVISION_DNSMAP-$VERSION_DNSMAP
     build:
       context: ./dnsmap
       args:
         REVISION: $REVISION_DNSMAP
 
   .zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET
+    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$VERSION_ZAPRET
     build:
       context: ./zapret
       args:
@@ -18,7 +18,7 @@ services:
       replicas: 0
 
   .sing-box:
-    image: ghcr.io/stek29/spoofskipper/sing-box:$REVISION_SINGBOX
+    image: ghcr.io/stek29/spoofskipper/sing-box:$REVISION_SINGBOX-$VERSION_SINGBOX
     build:
       context: ./sing-box
       args:
