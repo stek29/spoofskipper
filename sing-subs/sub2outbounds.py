@@ -14,6 +14,7 @@ from collections import ChainMap
 
 
 SUPPORTED_SCHEMES = ("vless://", "trojan://", "ss://", "vmess://", "hy2://", "hysteria2://")
+DEFAULT_EXCLUDED_TRANSPORT_TYPES = ("xhttp",)
 
 
 def fetch_url(url: str) -> str:
@@ -357,6 +358,7 @@ def transform_outbounds(
     group_fallback: str,
     ignore_pattern: re.Pattern[str] | None,
     group_exclude_pattern: re.Pattern[str] | None,
+    exclude_transport_types: set[str],
 ) -> dict[str, Any]:
     transformed: list[dict[str, Any]] = []
     grouped: dict[str, list[str]] = {}
@@ -377,6 +379,10 @@ def transform_outbounds(
         if ignore_pattern and ignore_pattern.search(outbound["tag"]):
             continue
 
+        transport = outbound.get("transport")
+        if isinstance(transport, dict) and transport.get("type") in exclude_transport_types:
+            continue
+
         transformed.append(outbound)
 
         if group_template and (not group_exclude_pattern or not group_exclude_pattern.search(outbound["tag"])):
@@ -395,6 +401,7 @@ def generate_output(
     group_fallback: str = "other",
     ignore_regex: str | None = None,
     group_exclude_regex: str | None = None,
+    exclude_transport_types: list[str] | None = None,
 ) -> dict[str, Any]:
     name_pattern = re.compile(name_regex) if name_regex else None
     ignore_pattern = re.compile(ignore_regex) if ignore_regex else None
@@ -416,6 +423,7 @@ def generate_output(
         group_fallback,
         ignore_pattern,
         group_exclude_pattern,
+        set(DEFAULT_EXCLUDED_TRANSPORT_TYPES if exclude_transport_types is None else exclude_transport_types),
     )
 
 
@@ -429,6 +437,7 @@ def main() -> int:
     parser.add_argument("--group-fallback", default="other")
     parser.add_argument("--ignore-regex")
     parser.add_argument("--group-exclude-regex")
+    parser.add_argument("--exclude-transport-type", action="append")
     args = parser.parse_args()
 
     json.dump(
@@ -441,6 +450,7 @@ def main() -> int:
             group_fallback=args.group_fallback,
             ignore_regex=args.ignore_regex,
             group_exclude_regex=args.group_exclude_regex,
+            exclude_transport_types=args.exclude_transport_type,
         ),
         sys.stdout,
         ensure_ascii=False,

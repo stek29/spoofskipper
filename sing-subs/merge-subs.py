@@ -100,6 +100,16 @@ def render_subscription(spec: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(url, str) or not url:
         raise SystemExit("each subscription must include a non-empty string url")
 
+    exclude_transport_types = spec.get("exclude_transport_types")
+    if exclude_transport_types is not None and (
+        not isinstance(exclude_transport_types, list)
+        or not all(
+            isinstance(transport_type, str) and transport_type
+            for transport_type in exclude_transport_types
+        )
+    ):
+        raise SystemExit("exclude_transport_types must be an array of non-empty strings")
+
     return sub2outbounds.generate_output(
         url,
         prefix=str(spec.get("prefix", "")),
@@ -109,6 +119,7 @@ def render_subscription(spec: dict[str, Any]) -> dict[str, Any]:
         group_fallback=str(spec.get("group_fallback", "other")),
         ignore_regex=spec.get("ignore_regex"),
         group_exclude_regex=spec.get("group_exclude_regex"),
+        exclude_transport_types=exclude_transport_types,
     )
 
 
