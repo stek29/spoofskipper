@@ -88,6 +88,10 @@ example config
 current sing-box WireGuard endpoint plus a separate recovery-state file. Both
 files contain credentials and are created with mode `0600`.
 
+The endpoint tag defaults to `warp` and can be changed with `--tag`. Use
+`--detour <outbound-tag>` to route the WireGuard peer's dial traffic through an
+existing sing-box outbound; omit it to dial the peer directly.
+
 ```sh
 # docker run --rm -it -v "$PWD:/src" -w /src golang:latest \
 go run ./cmd/warpgen \
