@@ -89,6 +89,7 @@ current sing-box WireGuard endpoint plus a separate recovery-state file. Both
 files contain credentials and are created with mode `0600`.
 
 ```sh
+# docker run --rm -it -v "$PWD:/src" -w /src golang:latest \
 go run ./cmd/warpgen \
   --accept-tos \
   --detour proxy \
@@ -96,9 +97,8 @@ go run ./cmd/warpgen \
   --state config/sing/local-warp-state.json
 ```
 
-Without a local Go installation, prepend
-`docker run --rm -it -v "$PWD:/src" -w /src golang:latest` before the same
-`go run` command. The bind mount keeps the generated credential files on the
+Run the command locally with Go, or remove `# ` from the first line to run it
+in Docker instead. The bind mount keeps the generated credential files on the
 host. The pinned `wgcf` v2.2.32 module requires Go 1.25 or newer.
 
 `local-*.json` is ignored by Git. In `config/sing/config.jsonnet`, add the
