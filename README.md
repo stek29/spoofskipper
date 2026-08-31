@@ -226,6 +226,7 @@ This project was inspired by the work of the following projects:
 This project uses following projects and relies on them:
 - [bol-van/zapret](https://github.com/bol-van/zapret)
 - [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
+- [ViRb3/wgcf](https://github.com/ViRb3/wgcf)
 - [savely-krasovsky/antizapret-sing-box](https://github.com/savely-krasovsky/antizapret-sing-box)
 
 Special thanks to the developers of these projects for their invaluable contributions.
