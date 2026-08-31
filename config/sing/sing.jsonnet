@@ -63,6 +63,8 @@ local default_config = {
 
   // outbound to use for tun traffic
   tun_outbound: 'direct',
+  // extra endpoints
+  endpoints: [],
   // extra outbounds
   outbounds: [],
 
@@ -188,6 +190,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
       sniff: false,
     },
   ],
+  endpoints: config.endpoints,
   outbounds: config.outbounds + [
     {
       type: 'direct',

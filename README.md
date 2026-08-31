@@ -38,6 +38,12 @@ example config
 
   tun_outbound: 'proxy',
 
+  // optional top-level sing-box endpoints
+  endpoints: [
+    // Uncomment after generating config/sing/local-warp.json below:
+    // std.parseJson(importstr 'local-warp.json'),
+  ],
+
   outbounds: [
     {
       tag: 'proxy',
@@ -71,6 +77,75 @@ example config
       format: 'binary',
       url: 'https://github.com/savely-krasovsky/antizapret-sing-box/releases/latest/download/antizapret.srs',
       download_detour: 'direct',
+    },
+  ],
+}
+```
+
+### WARP WireGuard endpoint
+
+`warpgen` registers a WARP device through the `wgcf` library and writes a
+current sing-box WireGuard endpoint plus a separate recovery-state file. Both
+files contain credentials and are created with mode `0600`.
+
+```sh
+go run ./cmd/warpgen \
+  --accept-tos \
+  --detour proxy \
+  --output config/sing/local-warp.json \
+  --state config/sing/local-warp-state.json
+```
+
+Without a local Go installation, prepend
+`docker run --rm -it -v "$PWD:/src" -w /src golang:latest` before the same
+`go run` command. The bind mount keeps the generated credential files on the
+host. The pinned `wgcf` v2.2.32 module requires Go 1.25 or newer.
+
+`local-*.json` is ignored by Git. In `config/sing/config.jsonnet`, add the
+generated endpoint to `endpoints` with:
+
+```jsonnet
+endpoints: [
+  std.parseJson(importstr 'local-warp.json'),
+],
+```
+
+The generated entry is an ordinary sing-box endpoint; it can also be supplied
+manually when credentials already exist. Its peer dial path may use an existing
+outbound through `detour`:
+
+```jsonnet
+{
+  endpoints: [
+    {
+      type: 'wireguard',
+      tag: 'warp',
+      address: [
+        '172.16.0.2/32',
+        '2606:4700:110:.../128',
+      ],
+      private_key: '<private-key>',
+      peers: [
+        {
+          address: 'engage.cloudflareclient.com',
+          port: 2408,
+          public_key: '<peer-public-key>',
+          allowed_ips: [
+            '0.0.0.0/0',
+            '::/0',
+          ],
+          persistent_keepalive_interval: 30,
+          reserved: [123, 45, 67],
+        },
+      ],
+      detour: 'proxy',
+    },
+  ],
+
+  outbounds: [
+    {
+      tag: 'proxy',
+      // existing proxy outbound config
     },
   ],
 }
