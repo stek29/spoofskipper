@@ -21,7 +21,10 @@ local default_config = {
 
   // settings for tun inbound
   tun: {
-    address: '172.19.0.1/30',
+    address: [
+      '172.19.0.1/30',
+      'fdfe:dcba:9876::1/126',
+    ],
   },
 
   // settings for the dns server inbound
