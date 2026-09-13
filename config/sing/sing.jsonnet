@@ -125,7 +125,7 @@ local geosite_rule_sets = [
     type: 'remote',
     format: 'binary',
     url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-%s.srs' % geosite_name,
-    download_detour: 'direct',
+    download_detour: config.tun_outbound,
   }
   for geosite_name in std.uniq(std.sort(
     config.proxy_geosites + config.zapret_geosites
