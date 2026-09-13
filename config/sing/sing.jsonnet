@@ -48,7 +48,7 @@ local default_config = {
 
   fakeip_dns: {
     inet4_range: '48.0.0.0/21',
-    inet6_range: 'fc00::/18',
+    inet6_range: '3000::/18',
   },
 
 
