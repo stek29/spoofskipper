@@ -13,6 +13,15 @@ services:
       - NET_RAW
     volumes:
       - ./config:/config:ro
+  
+  unbound:
+    image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
+    network_mode: service:zapret
+    environment:
+      UNBOUND_LISTEN_PORT: '5353'
+      UNBOUND_DNS64_PREFIX: '64:ff9b:1:7a61:7072:6574::/96'
+    volumes:
+      - ./config/unbound-dns64:/etc/unbound
 
   zapret:
     image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$VERSION_ZAPRET

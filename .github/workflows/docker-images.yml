@@ -39,6 +39,10 @@ jobs:
             context: ./sing-box
             revision_var: REVISION_SINGBOX
             version_var: VERSION_SINGBOX
+          - image: unbound
+            context: ./unbound
+            revision_var: REVISION_UNBOUND
+            version_var: VERSION_UNBOUND
 
     steps:
       - name: Checkout

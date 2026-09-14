@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+envsubst \
+  < "${UNBOUND_SRC_CONF}" \
+  > /tmp/unbound.conf
+
+exec unbound "$@"

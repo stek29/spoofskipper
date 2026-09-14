@@ -25,3 +25,12 @@ services:
         REVISION: $REVISION_SINGBOX
     deploy:
       replicas: 0
+
+  .unbound:
+    image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
+    build:
+      context: ./sing-box
+      args:
+        REVISION: $REVISION_SINGBOX
+    deploy:
+      replicas: 0
