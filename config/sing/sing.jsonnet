@@ -66,6 +66,8 @@ local default_config = {
 
   // outbound to use for tun traffic
   tun_outbound: 'direct',
+  // detour tag to use for geosites
+  gs_detour: 'direct',
   // extra endpoints
   endpoints: [],
   // extra outbounds
@@ -125,7 +127,7 @@ local geosite_rule_sets = [
     type: 'remote',
     format: 'binary',
     url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-%s.srs' % geosite_name,
-    download_detour: config.tun_outbound,
+    download_detour: config.gs_detour,
   }
   for geosite_name in std.uniq(std.sort(
     config.proxy_geosites + config.zapret_geosites
