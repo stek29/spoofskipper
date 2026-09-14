@@ -18,6 +18,7 @@ services:
     image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
     network_mode: service:zapret
     environment:
+      UNBOUND_FORWARD_TCP: 'yes' # TCP isn't forced to National Domain Name System (yet)
       UNBOUND_LISTEN_PORT: '5353'
       UNBOUND_DNS64_PREFIX: '64:ff9b:1:7a61:7072:6574::/96'
     volumes:
