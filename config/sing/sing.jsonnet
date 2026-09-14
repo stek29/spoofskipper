@@ -111,7 +111,7 @@ local default_config = {
     enabled: true,
     path: '/data/cache.db',
     store_fakeip: true,
-    store_rdrc: true,
+    store_dns: true,
     rdrc_timeout: '1h',
   },
 
@@ -180,7 +180,6 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
         rule_set: hijack_rule_sets,
       },
     ] + config.extra_dns_rules,
-    independent_cache: true,
   },
   inbounds: [
     config.tun {
