@@ -3,7 +3,6 @@
 set -euo pipefail
 
 /nftables.nft
-killall dnsmap || :
 
 # shellcheck source=../config/zapret.sh
 source "$1"

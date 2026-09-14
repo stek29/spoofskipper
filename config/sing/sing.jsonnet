@@ -8,7 +8,7 @@ local default_config = {
     type: 'udp',
     server: '77.88.8.8',
   },
-  // dns server address of zapret's dnsmap
+  // dns server address of zapret's nat64 unbound
   zapret_dns: {
     type: 'udp',
     server: '8.8.8.8',

@@ -9,5 +9,4 @@ define NFQ_NUM = 200;
 define TCP_PORTS = { 80, 443 };
 define UDP_PORTS = { 443, 590-1400, 3478-3497, 19294-19344, 50000-50100 };
 
-define DNSMAP_RANGE = 48.0.16.0/22;
-define DNSMAP_MARK = 0x2;
+define TAYGA_POOL4 = 192.168.240.0/20;

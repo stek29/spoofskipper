@@ -1,13 +1,4 @@
 services:
-  .dnsmap:
-    deploy:
-      replicas: 0
-    image: ghcr.io/stek29/spoofskipper/dnsmap:$REVISION_DNSMAP-$VERSION_DNSMAP
-    build:
-      context: ./dnsmap
-      args:
-        REVISION: $REVISION_DNSMAP
-
   .zapret:
     image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$VERSION_ZAPRET
     build:

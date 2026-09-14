@@ -27,10 +27,6 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - image: dnsmap
-            context: ./dnsmap
-            revision_var: REVISION_DNSMAP
-            version_var: VERSION_DNSMAP
           - image: zapret
             context: ./zapret
             revision_var: REVISION_ZAPRET

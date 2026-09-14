@@ -1,26 +1,10 @@
 services:
-  dnsmap:
-    image: ghcr.io/stek29/spoofskipper/dnsmap:$REVISION_DNSMAP-$VERSION_DNSMAP
-    command:
-      - -config
-      - /config/dnsmap.json
-    restart: unless-stopped
-    network_mode: service:zapret
-    # so it will be killed on zapret restart to force nftables reload
-    pid: service:zapret
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    volumes:
-      - ./config:/config:ro
-  
   unbound:
     image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
     network_mode: service:zapret
     restart: always
     environment:
       UNBOUND_FORWARD_TCP: 'yes' # TCP isn't forced to National Domain Name System (yet)
-      UNBOUND_LISTEN_PORT: '5353'
       UNBOUND_DNS64_PREFIX: '64:ff9b:1:7a61:7072:6574::/96'
     volumes:
       - ./config/unbound-dns64:/etc/unbound
@@ -30,13 +14,10 @@ services:
     image: ghcr.io/apalrd/tayga-nat64:0.9.6
     network_mode: service:zapret
     restart: always
-
     cap_add:
       - NET_ADMIN
-
     devices:
       - /dev/net/tun:/dev/net/tun
-
     environment:
       TAYGA_PREF64: '64:ff9b:1:7a61:7072:6574::/96'
       TAYGA_POOL4: '192.168.240.0/20'

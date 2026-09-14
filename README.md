@@ -3,20 +3,25 @@ a set of containers to bypass censorship
 
 ## components
 
-### [dnsmap](https://github.com/stek29/myazvpn/tree/main/dnsmap)
-Proxying dns server, which manages nftables NAT mappings for all of resolved domains
+### [unbound](https://unbound.net/)
+
+Provides DNS64 to use with Tayga
+
+### [TAYGA](https://github.com/apalrd/tayga)
+
+NAT64 implemented in user-space with tun
 
 ### [zapret](https://github.com/bol-van/zapret)
 
 > A stand-alone (without 3rd party servers) DPI circumvention tool
 
-used in combination with dnsmap for some bypasses
+used in combination with unbound and tayga for some bypasses
 
 ### [sing-box](https://sing-box.sagernet.org)
 
 core part - manages dns routing:
-- to be proxied -- responds with `fakeip` addresses (same as dnsmap, but implemented inside `sing-box`)
-- to be zapret'ed -- forwards to `dnsmap` running in `zapret` container
+- to be proxied -- responds with `fakeip` addresses
+- to be zapret'ed -- forwards to `unbound` running in `zapret` container in dns64 only mode
 - others -- forwarded to upstream resolver, returned as-is
 
 and runs tunnels themselves. it's expected that its `fakeip` range will be routed into the container somehow,
@@ -167,10 +172,18 @@ services:
     networks:
       default:
         ipv4_address: '192.168.1.2'
+        ipv6_address: 'fc00::2'
+        driver_opts:
+          com.docker.network.endpoint.sysctls: >-
+            net.ipv6.conf.IFNAME.accept_ra=2
   sing-tun:
     networks:
       default:
         ipv4_address: '192.168.1.3'
+        ipv6_address: 'fc00::3'
+        driver_opts:
+          com.docker.network.endpoint.sysctls: >-
+            net.ipv6.conf.IFNAME.accept_ra=2
 
 networks:
   default:
@@ -182,9 +195,10 @@ networks:
         - subnet: 192.168.1.0/24
           gateway: '192.168.1.1'
           ip_range: 192.168.1.0/24
+        - subnet: 'fc00::/64'
 ```
 
-route `fakeip` and `dnsmap` ranges for corresponding containers on your network (static routes are enough)
+route `fakeip` and `nat64` ranges for corresponding containers on your network (static routes are enough)
 
 ### run
 just normal docker compose
@@ -232,6 +246,8 @@ This project uses following projects and relies on them:
 - [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
 - [ViRb3/wgcf](https://github.com/ViRb3/wgcf)
 - [savely-krasovsky/antizapret-sing-box](https://github.com/savely-krasovsky/antizapret-sing-box)
+- [unbound](https://unbound.net/)
+- [apalrd/TAYGA](https://github.com/apalrd/tayga)
 
 Special thanks to the developers of these projects for their invaluable contributions.
 

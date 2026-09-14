@@ -37,37 +37,9 @@ table inet zapret {
 }
 
 table ip nat {
-  map dnsmap {
-    type ipv4_addr : ipv4_addr ;
-  }
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
 
-  chain dnsmap {
-    counter \
-      meta mark set meta mark | $DNSMAP_MARK \
-      dnat to ip daddr map @dnsmap \
-      comment "dnat known dnsmap entries"
-  }
-
-  chain prerouting {
-    type nat hook prerouting priority dstnat; policy accept;
-
-    counter goto dnsmap \
-      comment "process dnsmap addresses"
-  }
-
-  chain output {
-    type nat hook output priority dstnat; policy accept;
-
-    ip daddr $DNSMAP_RANGE \
-      counter goto dnsmap \
-      comment "process dnsmap addresses"
-  }
-
-  chain postrouting {
-    type nat hook postrouting priority srcnat; policy accept;
-
-    meta mark & $DNSMAP_MARK == $DNSMAP_MARK \
-      counter masquerade \
-      comment "masquerade outgoing traffic"
-  }
+        ip saddr $TAYGA_POOL4 counter masquerade
+    }
 }
