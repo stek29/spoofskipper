@@ -4,7 +4,9 @@ services:
     network_mode: service:zapret
     restart: always
     environment:
-      UNBOUND_FORWARD_TCP: 'yes' # TCP isn't forced to National Domain Name System (yet)
+      UNBOUND_FORWARD_ADDR: '8.8.8.8@853#dns.google'
+      UNBOUND_FORWARD_TCP: 'no'
+      UNBOUND_FORWARD_TLS: 'yes'
       UNBOUND_DNS64_PREFIX: '64:ff9b:1:7a61:7072:6574::/96'
     volumes:
       - ./config/unbound-dns64:/etc/unbound
