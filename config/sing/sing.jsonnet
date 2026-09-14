@@ -29,7 +29,7 @@ local default_config = {
 
   // settings for the dns server inbound
   dns_server: {
-    listen: '0.0.0.0',
+    listen: '::',
     listen_port: 53,
   },
 
