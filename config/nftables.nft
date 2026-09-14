@@ -6,11 +6,6 @@ define DESYNC_MARK_POSTNAT=0x20000000;
 
 define NFQ_NUM = 200;
 
-define TCP_PKT_OUT = 20;
-define TCP_PKT_IN = 10;
-define UDP_PKT_OUT = 5;
-define UDP_PKT_IN = 3;
-
 define TCP_PORTS = { 80, 443 };
 define UDP_PORTS = { 443, 590-1400, 3478-3497, 19294-19344, 50000-50100 };
 
