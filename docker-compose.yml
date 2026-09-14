@@ -17,6 +17,7 @@ services:
   unbound:
     image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
     network_mode: service:zapret
+    restart: always
     environment:
       UNBOUND_FORWARD_TCP: 'yes' # TCP isn't forced to National Domain Name System (yet)
       UNBOUND_LISTEN_PORT: '5353'
@@ -30,7 +31,7 @@ services:
     #   NFQWS_DEFAULT_ARGS: '--debug' # example
     #   ZAPRET_PRERUN: 'ip r add default via 127.1.2.3'
     command: "/config/zapret.sh"
-    restart: unless-stopped
+    restart: always
     privileged: true
     cap_add:
       - NET_ADMIN
@@ -44,7 +45,7 @@ services:
       - ./config/sing:/config:ro
       - ./data:/data:rw
     command: ['run', '-c', '/tmp/sing.json']
-    restart: unless-stopped
+    restart: always
     privileged: true
     cap_add:
       - NET_ADMIN
