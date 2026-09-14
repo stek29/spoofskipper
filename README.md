@@ -172,7 +172,8 @@ services:
     networks:
       default:
         ipv4_address: '192.168.1.2'
-        ipv6_address: 'fc00::2'
+        mac_address: '02:ca:fe:ba:be:02'
+        ipv6_address: 'fc00:::ca:feff:feba:be02'
         driver_opts:
           com.docker.network.endpoint.sysctls: >-
             net.ipv6.conf.IFNAME.accept_ra=2
@@ -180,7 +181,8 @@ services:
     networks:
       default:
         ipv4_address: '192.168.1.3'
-        ipv6_address: 'fc00::3'
+        mac_address: '02:ca:fe:ba:be:03'
+        ipv6_address: 'fc00:::ca:feff:feba:be03'
         driver_opts:
           com.docker.network.endpoint.sysctls: >-
             net.ipv6.conf.IFNAME.accept_ra=2
