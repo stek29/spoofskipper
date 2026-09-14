@@ -42,5 +42,8 @@ table ip nat {
         type nat hook postrouting priority srcnat; policy accept;
 
         ip saddr $TAYGA_POOL4 counter masquerade
+
+        # masquerade everything to avoid routing loops
+        meta oif != lo counter masquerade
     }
 }
