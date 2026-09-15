@@ -1,12 +1,12 @@
 module github.com/stek29/spoofskipper
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/ViRb3/wgcf/v2 v2.2.32
 	github.com/ViRb3/wgcf/v2/openapi v0.0.0-00010101000000-000000000000
-	github.com/sagernet/sing v0.8.11
-	github.com/sagernet/sing-box v1.13.14
+	github.com/sagernet/sing v0.9.4
+	github.com/sagernet/sing-box v1.14.1
 )
 
 require (
@@ -23,7 +23,7 @@ require (
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
