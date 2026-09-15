@@ -60,7 +60,7 @@
       ],
       "depNameTemplate": "unbound",
       "datasourceTemplate": "apk",
-      "registryUrlTemplate": "https://dl-cdn.alpinelinux.org/alpine/v{{{apkmajor}}}/main/x86_64/APKINDEX.tar.gz",
+      "registryUrlTemplate": "https://dl-cdn.alpinelinux.org/alpine?branch=v{{{apkmajor}}}&components=main&arch=x86_64",
       "autoReplaceStringTemplate": "REVISION_ALPINE_IMAGE={{{apkmajor}}}.{{{apkmicro}}}\n{{{middle}}}REVISION_UNBOUND={{{newValue}}}\nVERSION_UNBOUND=1"
     }
   ],
