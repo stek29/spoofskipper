@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/ViRb3/wgcf/v2 v2.2.32
 	github.com/ViRb3/wgcf/v2/openapi v0.0.0-00010101000000-000000000000
-	github.com/sagernet/sing v0.8.11
+	github.com/sagernet/sing v0.9.4
 	github.com/sagernet/sing-box v1.13.14
 )
 
