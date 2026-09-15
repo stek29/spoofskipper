@@ -1,6 +1,6 @@
 services:
   unbound:
-    image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
+    image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$REVISION_ALPINE_IMAGE-$VERSION_UNBOUND
     network_mode: service:zapret
     restart: always
     environment:
@@ -27,7 +27,7 @@ services:
       TAYGA_LOG: 'drop reject icmp self dyn'
 
   zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$VERSION_ZAPRET
+    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$REVISION_ALPINE_IMAGE-$VERSION_ZAPRET
     environment: {}
     #   NFQWS_DEFAULT_ARGS: '--debug' # example
     #   ZAPRET_PRERUN: 'ip r add default via 127.1.2.3'

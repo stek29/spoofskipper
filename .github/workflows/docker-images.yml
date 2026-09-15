@@ -31,6 +31,7 @@ jobs:
             context: ./zapret
             revision_var: REVISION_ZAPRET
             version_var: VERSION_ZAPRET
+            base_ver: REVISION_ALPINE_IMAGE
           - image: sing-box
             context: ./sing-box
             revision_var: REVISION_SINGBOX
@@ -39,6 +40,7 @@ jobs:
             context: ./unbound
             revision_var: REVISION_UNBOUND
             version_var: VERSION_UNBOUND
+            base_ver: REVISION_ALPINE_IMAGE
 
     steps:
       - name: Checkout
@@ -49,25 +51,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           source .env
-          revision="${!REVISION_VAR}"
-          if [[ -z "$revision" ]]; then
-            echo "Missing revision for $REVISION_VAR" >&2
-            exit 1
-          fi
 
-          version="${!VERSION_VAR}"
-          if [[ -z "$version" ]]; then
-            echo "Missing version for $VERSION_VAR" >&2
-            exit 1
-          fi
+          revision="${!REVISION_VAR:?Missing revision}"
+          version="${!VERSION_VAR:?Missing version}"
 
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-          echo "version=${revision}-${version}" >> "$GITHUB_OUTPUT"
+          tag="$revision"
+          if [[ -n "${BASE_VER:-}" ]]; then
+            base="${!BASE_VER:?Missing base version}"
+            tag+="-$base"
+          fi
+          tag+="-$version"
+
+          {
+            echo "revision=$revision"
+            echo "base=${base:-}"
+            echo "version=$tag"
+          } >> "$GITHUB_OUTPUT"
         env:
           REVISION_VAR: ${{ matrix.revision_var }}
           VERSION_VAR: ${{ matrix.version_var }}
+          BASE_VER: ${{ matrix.base_ver }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -111,6 +115,7 @@ jobs:
           push: true
           build-args: |
             REVISION=${{ steps.image.outputs.revision }}
+            BASE_VER=${{ steps.image.outputs.base }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:${{ steps.image.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.image }}

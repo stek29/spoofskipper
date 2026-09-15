@@ -1,0 +1,87 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    ":dependencyDashboard",
+    ":disableRateLimiting"
+  ],
+  "enabledManagers": [
+    "custom.regex",
+    "docker-compose",
+    "github-actions",
+    "gomod",
+    "dockerfile"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.env$/"
+      ],
+      "matchStrings": [
+        "REVISION_ALPINE_IMAGE=(?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "alpine",
+      "datasourceTemplate": "docker",
+      "autoReplaceStringTemplate": "REVISION_ALPINE_IMAGE={{{newValue}}}"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.env$/"
+      ],
+      "matchStrings": [
+        "REVISION_ZAPRET=(?<currentValue>\\S+)\\nVERSION_ZAPRET=\\d+"
+      ],
+      "depNameTemplate": "bol-van/zapret",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "loose",
+      "autoReplaceStringTemplate": "REVISION_ZAPRET={{{newValue}}}\nVERSION_ZAPRET=1"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.env$/"
+      ],
+      "matchStrings": [
+        "REVISION_SINGBOX=(?<currentValue>\\S+)\\nVERSION_SINGBOX=\\d+"
+      ],
+      "depNameTemplate": "ghcr.io/sagernet/sing-box",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+      "autoReplaceStringTemplate": "REVISION_SINGBOX={{{newValue}}}\nVERSION_SINGBOX=1"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.env$/"
+      ],
+      "matchStrings": [
+        "REVISION_ALPINE_IMAGE=(?<apkmajor>\\d+\\.\\d+)\\.(?<apkmicro>\\d+)\\n(?<middle>[\\s\\S]*?)REVISION_UNBOUND=(?<currentValue>\\S+)\\nVERSION_UNBOUND=\\d+"
+      ],
+      "depNameTemplate": "unbound",
+      "datasourceTemplate": "apk",
+      "registryUrlTemplate": "https://dl-cdn.alpinelinux.org/alpine/v{{{apkmajor}}}/main/x86_64/APKINDEX.tar.gz",
+      "autoReplaceStringTemplate": "REVISION_ALPINE_IMAGE={{{apkmajor}}}.{{{apkmicro}}}\n{{{middle}}}REVISION_UNBOUND={{{newValue}}}\nVERSION_UNBOUND=1"
+    }
+  ],
+  "labels": [
+    "renovate"
+  ],
+  "dependencyDashboardLabels": [
+    "renovate"
+  ],
+  "automerge": false,
+  "pinDigests": false,
+  "ignoreUnstable": true,
+  "packageRules": [
+    {
+      "matchManagers": [
+        "docker-compose"
+      ],
+      "matchPackageNames": [
+        "/^ghcr\\.io\\/stek29\\/spoofskipper\\//"
+      ],
+      "enabled": false
+    }
+  ]
+}

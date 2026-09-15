@@ -1,10 +1,11 @@
 services:
   .zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$VERSION_ZAPRET
+    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$REVISION_ALPINE_IMAGE-$VERSION_ZAPRET
     build:
       context: ./zapret
       args:
         REVISION: $REVISION_ZAPRET
+        BASE_VER: $REVISION_ALPINE_IMAGE
     deploy:
       replicas: 0
 
@@ -18,10 +19,11 @@ services:
       replicas: 0
 
   .unbound:
-    image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$VERSION_UNBOUND
+    image: ghcr.io/stek29/spoofskipper/unbound:$REVISION_UNBOUND-$REVISION_ALPINE_IMAGE-$VERSION_UNBOUND
     build:
-      context: ./sing-box
+      context: ./unbound
       args:
-        REVISION: $REVISION_SINGBOX
+        REVISION: $REVISION_UNBOUND
+        BASE_VER: $REVISION_ALPINE_IMAGE
     deploy:
       replicas: 0

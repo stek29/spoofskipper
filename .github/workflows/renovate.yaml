@@ -1,0 +1,52 @@
+name: Renovate
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+  issues:
+    types:
+      - edited
+  pull_request_target:
+    types:
+      - edited
+      - closed
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: read
+
+jobs:
+  renovate:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issues' &&
+        contains(github.event.issue.labels.*.name, 'renovate')
+      ) ||
+      (
+        github.event_name == 'pull_request_target' &&
+        contains(github.event.pull_request.labels.*.name, 'renovate')
+      )
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Renovate
+        uses: renovatebot/github-action@v46.3.1
+        with:
+          token: ${{ github.token }}
+        env:
+          RENOVATE_PLATFORM: github
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_CONFIG_VALIDATION_ERROR: "true"

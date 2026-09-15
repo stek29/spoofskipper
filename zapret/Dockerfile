@@ -1,4 +1,9 @@
-FROM alpine:3.23.2
+# IMPORTANT: Any change affecting this image requires manually incrementing
+# VERSION_ZAPRET in ../.env so a new image tag is published.
+# (REVISION_ALPINE_IMAGE bumps are reflected in the tag automatically.)
+
+ARG BASE_VER
+FROM alpine:${BASE_VER}
 
 RUN apk add --no-cache \
     nftables \

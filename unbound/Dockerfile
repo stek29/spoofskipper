@@ -1,4 +1,9 @@
-FROM alpine:3.24.1
+# IMPORTANT: Any change affecting this image requires manually incrementing
+# VERSION_UNBOUND in ../.env so a new image tag is published.
+# (REVISION_ALPINE_IMAGE bumps are reflected in the tag automatically.)
+
+ARG BASE_VER
+FROM alpine:${BASE_VER}
 
 ARG REVISION
 RUN apk add --no-cache \
