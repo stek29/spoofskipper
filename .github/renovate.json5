@@ -73,6 +73,9 @@
   "automerge": false,
   "pinDigests": false,
   "ignoreUnstable": true,
+  "vulnerabilityAlerts": {
+    "enabled": false
+  },
   "packageRules": [
     {
       "matchManagers": [
