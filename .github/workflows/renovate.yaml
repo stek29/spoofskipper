@@ -16,6 +16,13 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: read
+  security-events: read
+
 jobs:
   renovate:
     if: >-
@@ -31,13 +38,6 @@ jobs:
       )
 
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      packages: read
-      security-events: read
 
     steps:
       - name: Checkout
