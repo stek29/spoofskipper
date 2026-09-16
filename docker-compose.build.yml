@@ -27,3 +27,12 @@ services:
         BASE_VER: $REVISION_ALPINE_IMAGE
     deploy:
       replicas: 0
+
+  .tayga:
+    image: ghcr.io/stek29/spoofskipper/tayga:$REVISION_TAYGA-$VERSION_TAYGA
+    build:
+      context: ./tayga
+      args:
+        REVISION: $REVISION_TAYGA
+    deploy:
+      replicas: 0

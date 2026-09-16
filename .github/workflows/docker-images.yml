@@ -41,6 +41,10 @@ jobs:
             revision_var: REVISION_UNBOUND
             version_var: VERSION_UNBOUND
             base_ver: REVISION_ALPINE_IMAGE
+          - image: tayga
+            context: ./tayga
+            revision_var: REVISION_TAYGA
+            version_var: VERSION_TAYGA
 
     steps:
       - name: Checkout

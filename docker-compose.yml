@@ -12,8 +12,7 @@ services:
       - ./config/unbound-dns64:/etc/unbound
 
   tayga:
-    # TODO: switch to custom image
-    image: ghcr.io/apalrd/tayga-nat64:0.9.6
+    image: ghcr.io/stek29/spoofskipper/tayga:$REVISION_TAYGA-$VERSION_TAYGA
     network_mode: service:zapret
     restart: always
     cap_add:
