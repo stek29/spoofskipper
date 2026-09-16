@@ -8,7 +8,6 @@
     "custom.regex",
     "docker-compose",
     "github-actions",
-    "gomod",
     "dockerfile"
   ],
   "customManagers": [
