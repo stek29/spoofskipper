@@ -22,6 +22,7 @@ permissions:
   pull-requests: write
   packages: read
   security-events: read
+  workflows: write
 
 jobs:
   renovate:
@@ -51,4 +52,3 @@ jobs:
           RENOVATE_PLATFORM: github
           RENOVATE_REPOSITORIES: ${{ github.repository }}
           RENOVATE_CONFIG_VALIDATION_ERROR: "true"
-          LOG_LEVEL: debug # TEMP: diagnosing missing PRs, revert after
