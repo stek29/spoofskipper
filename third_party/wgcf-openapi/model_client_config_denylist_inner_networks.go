@@ -15,41 +15,41 @@ import (
 	"fmt"
 )
 
-// checks if the NetworkAddress type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &NetworkAddress{}
+// checks if the ClientConfigDenylistInnerNetworks type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &ClientConfigDenylistInnerNetworks{}
 
-// NetworkAddress struct for NetworkAddress
-type NetworkAddress struct {
-	V4 string `json:"v4"`
-	V6 string `json:"v6"`
+// ClientConfigDenylistInnerNetworks struct for ClientConfigDenylistInnerNetworks
+type ClientConfigDenylistInnerNetworks struct {
+	V4 []IPv4Network `json:"v4"`
+	V6 []IPv6Network `json:"v6"`
 	AdditionalProperties map[string]interface{}
 }
 
-type _NetworkAddress NetworkAddress
+type _ClientConfigDenylistInnerNetworks ClientConfigDenylistInnerNetworks
 
-// NewNetworkAddress instantiates a new NetworkAddress object
+// NewClientConfigDenylistInnerNetworks instantiates a new ClientConfigDenylistInnerNetworks object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewNetworkAddress(v4 string, v6 string) *NetworkAddress {
-	this := NetworkAddress{}
+func NewClientConfigDenylistInnerNetworks(v4 []IPv4Network, v6 []IPv6Network) *ClientConfigDenylistInnerNetworks {
+	this := ClientConfigDenylistInnerNetworks{}
 	this.V4 = v4
 	this.V6 = v6
 	return &this
 }
 
-// NewNetworkAddressWithDefaults instantiates a new NetworkAddress object
+// NewClientConfigDenylistInnerNetworksWithDefaults instantiates a new ClientConfigDenylistInnerNetworks object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewNetworkAddressWithDefaults() *NetworkAddress {
-	this := NetworkAddress{}
+func NewClientConfigDenylistInnerNetworksWithDefaults() *ClientConfigDenylistInnerNetworks {
+	this := ClientConfigDenylistInnerNetworks{}
 	return &this
 }
 
 // GetV4 returns the V4 field value
-func (o *NetworkAddress) GetV4() string {
+func (o *ClientConfigDenylistInnerNetworks) GetV4() []IPv4Network {
 	if o == nil {
-		var ret string
+		var ret []IPv4Network
 		return ret
 	}
 
@@ -58,22 +58,22 @@ func (o *NetworkAddress) GetV4() string {
 
 // GetV4Ok returns a tuple with the V4 field value
 // and a boolean to check if the value has been set.
-func (o *NetworkAddress) GetV4Ok() (*string, bool) {
+func (o *ClientConfigDenylistInnerNetworks) GetV4Ok() ([]IPv4Network, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.V4, true
+	return o.V4, true
 }
 
 // SetV4 sets field value
-func (o *NetworkAddress) SetV4(v string) {
+func (o *ClientConfigDenylistInnerNetworks) SetV4(v []IPv4Network) {
 	o.V4 = v
 }
 
 // GetV6 returns the V6 field value
-func (o *NetworkAddress) GetV6() string {
+func (o *ClientConfigDenylistInnerNetworks) GetV6() []IPv6Network {
 	if o == nil {
-		var ret string
+		var ret []IPv6Network
 		return ret
 	}
 
@@ -82,19 +82,19 @@ func (o *NetworkAddress) GetV6() string {
 
 // GetV6Ok returns a tuple with the V6 field value
 // and a boolean to check if the value has been set.
-func (o *NetworkAddress) GetV6Ok() (*string, bool) {
+func (o *ClientConfigDenylistInnerNetworks) GetV6Ok() ([]IPv6Network, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.V6, true
+	return o.V6, true
 }
 
 // SetV6 sets field value
-func (o *NetworkAddress) SetV6(v string) {
+func (o *ClientConfigDenylistInnerNetworks) SetV6(v []IPv6Network) {
 	o.V6 = v
 }
 
-func (o NetworkAddress) MarshalJSON() ([]byte, error) {
+func (o ClientConfigDenylistInnerNetworks) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -102,7 +102,7 @@ func (o NetworkAddress) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o NetworkAddress) ToMap() (map[string]interface{}, error) {
+func (o ClientConfigDenylistInnerNetworks) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["v4"] = o.V4
 	toSerialize["v6"] = o.V6
@@ -114,7 +114,7 @@ func (o NetworkAddress) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-func (o *NetworkAddress) UnmarshalJSON(data []byte) (err error) {
+func (o *ClientConfigDenylistInnerNetworks) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -137,15 +137,15 @@ func (o *NetworkAddress) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varNetworkAddress := _NetworkAddress{}
+	varClientConfigDenylistInnerNetworks := _ClientConfigDenylistInnerNetworks{}
 
-	err = json.Unmarshal(data, &varNetworkAddress)
+	err = json.Unmarshal(data, &varClientConfigDenylistInnerNetworks)
 
 	if err != nil {
 		return err
 	}
 
-	*o = NetworkAddress(varNetworkAddress)
+	*o = ClientConfigDenylistInnerNetworks(varClientConfigDenylistInnerNetworks)
 
 	additionalProperties := make(map[string]interface{})
 
@@ -158,38 +158,38 @@ func (o *NetworkAddress) UnmarshalJSON(data []byte) (err error) {
 	return err
 }
 
-type NullableNetworkAddress struct {
-	value *NetworkAddress
+type NullableClientConfigDenylistInnerNetworks struct {
+	value *ClientConfigDenylistInnerNetworks
 	isSet bool
 }
 
-func (v NullableNetworkAddress) Get() *NetworkAddress {
+func (v NullableClientConfigDenylistInnerNetworks) Get() *ClientConfigDenylistInnerNetworks {
 	return v.value
 }
 
-func (v *NullableNetworkAddress) Set(val *NetworkAddress) {
+func (v *NullableClientConfigDenylistInnerNetworks) Set(val *ClientConfigDenylistInnerNetworks) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableNetworkAddress) IsSet() bool {
+func (v NullableClientConfigDenylistInnerNetworks) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableNetworkAddress) Unset() {
+func (v *NullableClientConfigDenylistInnerNetworks) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableNetworkAddress(val *NetworkAddress) *NullableNetworkAddress {
-	return &NullableNetworkAddress{value: val, isSet: true}
+func NewNullableClientConfigDenylistInnerNetworks(val *ClientConfigDenylistInnerNetworks) *NullableClientConfigDenylistInnerNetworks {
+	return &NullableClientConfigDenylistInnerNetworks{value: val, isSet: true}
 }
 
-func (v NullableNetworkAddress) MarshalJSON() ([]byte, error) {
+func (v NullableClientConfigDenylistInnerNetworks) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableNetworkAddress) UnmarshalJSON(src []byte) error {
+func (v *NullableClientConfigDenylistInnerNetworks) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

@@ -108,7 +108,7 @@ go run ./cmd/warpgen \
 
 Run the command locally with Go, or remove `# ` from the first line to run it
 in Docker instead. The bind mount keeps the generated credential files on the
-host. The pinned `wgcf` v2.2.32 module requires Go 1.25 or newer.
+host. The pinned `wgcf` v2.3.0 module requires Go 1.26 or newer.
 
 `local-*.json` is ignored by Git. In `config/sing/config.jsonnet`, add the
 generated endpoint to `endpoints` with:

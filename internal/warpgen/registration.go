@@ -25,17 +25,29 @@ func RegistrationFromWGCF(registration *openapi.Register200Response) (Registrati
 	if registration == nil {
 		return Registration{}, fmt.Errorf("WARP registration response is nil")
 	}
+	if registration.Config == nil {
+		return Registration{}, fmt.Errorf("WARP registration response has no config")
+	}
 	peers := make([]Peer, len(registration.Config.Peers))
 	for index, peer := range registration.Config.Peers {
+		host := peer.Endpoint.GetHost()
+		if host == "" {
+			// Fallback to raw IPs if Host is unset (new API makes Host optional).
+			if peer.Endpoint.V4 != "" {
+				host = peer.Endpoint.V4
+			} else {
+				host = peer.Endpoint.V6
+			}
+		}
 		peers[index] = Peer{
 			PublicKey: peer.PublicKey,
-			Endpoint:  peer.Endpoint.Host,
+			Endpoint:  host,
 		}
 	}
 	return Registration{
 		DeviceID:    registration.Id,
 		AccessToken: registration.Token,
-		LicenseKey:  registration.Account.License,
+		LicenseKey:  registration.Account.GetLicense(),
 		ClientID:    registration.Config.ClientId,
 		IPv4:        registration.Config.Interface.Addresses.V4,
 		IPv6:        registration.Config.Interface.Addresses.V6,

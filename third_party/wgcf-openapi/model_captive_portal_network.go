@@ -15,60 +15,60 @@ import (
 	"fmt"
 )
 
-// checks if the UpdateAccountRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &UpdateAccountRequest{}
+// checks if the CaptivePortalNetwork type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &CaptivePortalNetwork{}
 
-// UpdateAccountRequest struct for UpdateAccountRequest
-type UpdateAccountRequest struct {
-	License string `json:"license"`
+// CaptivePortalNetwork struct for CaptivePortalNetwork
+type CaptivePortalNetwork struct {
+	Address string `json:"address"`
 	AdditionalProperties map[string]interface{}
 }
 
-type _UpdateAccountRequest UpdateAccountRequest
+type _CaptivePortalNetwork CaptivePortalNetwork
 
-// NewUpdateAccountRequest instantiates a new UpdateAccountRequest object
+// NewCaptivePortalNetwork instantiates a new CaptivePortalNetwork object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewUpdateAccountRequest(license string) *UpdateAccountRequest {
-	this := UpdateAccountRequest{}
-	this.License = license
+func NewCaptivePortalNetwork(address string) *CaptivePortalNetwork {
+	this := CaptivePortalNetwork{}
+	this.Address = address
 	return &this
 }
 
-// NewUpdateAccountRequestWithDefaults instantiates a new UpdateAccountRequest object
+// NewCaptivePortalNetworkWithDefaults instantiates a new CaptivePortalNetwork object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewUpdateAccountRequestWithDefaults() *UpdateAccountRequest {
-	this := UpdateAccountRequest{}
+func NewCaptivePortalNetworkWithDefaults() *CaptivePortalNetwork {
+	this := CaptivePortalNetwork{}
 	return &this
 }
 
-// GetLicense returns the License field value
-func (o *UpdateAccountRequest) GetLicense() string {
+// GetAddress returns the Address field value
+func (o *CaptivePortalNetwork) GetAddress() string {
 	if o == nil {
 		var ret string
 		return ret
 	}
 
-	return o.License
+	return o.Address
 }
 
-// GetLicenseOk returns a tuple with the License field value
+// GetAddressOk returns a tuple with the Address field value
 // and a boolean to check if the value has been set.
-func (o *UpdateAccountRequest) GetLicenseOk() (*string, bool) {
+func (o *CaptivePortalNetwork) GetAddressOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.License, true
+	return &o.Address, true
 }
 
-// SetLicense sets field value
-func (o *UpdateAccountRequest) SetLicense(v string) {
-	o.License = v
+// SetAddress sets field value
+func (o *CaptivePortalNetwork) SetAddress(v string) {
+	o.Address = v
 }
 
-func (o UpdateAccountRequest) MarshalJSON() ([]byte, error) {
+func (o CaptivePortalNetwork) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,9 +76,9 @@ func (o UpdateAccountRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o UpdateAccountRequest) ToMap() (map[string]interface{}, error) {
+func (o CaptivePortalNetwork) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["license"] = o.License
+	toSerialize["address"] = o.Address
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -87,12 +87,12 @@ func (o UpdateAccountRequest) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-func (o *UpdateAccountRequest) UnmarshalJSON(data []byte) (err error) {
+func (o *CaptivePortalNetwork) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"license",
+		"address",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -109,58 +109,58 @@ func (o *UpdateAccountRequest) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varUpdateAccountRequest := _UpdateAccountRequest{}
+	varCaptivePortalNetwork := _CaptivePortalNetwork{}
 
-	err = json.Unmarshal(data, &varUpdateAccountRequest)
+	err = json.Unmarshal(data, &varCaptivePortalNetwork)
 
 	if err != nil {
 		return err
 	}
 
-	*o = UpdateAccountRequest(varUpdateAccountRequest)
+	*o = CaptivePortalNetwork(varCaptivePortalNetwork)
 
 	additionalProperties := make(map[string]interface{})
 
 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "license")
+		delete(additionalProperties, "address")
 		o.AdditionalProperties = additionalProperties
 	}
 
 	return err
 }
 
-type NullableUpdateAccountRequest struct {
-	value *UpdateAccountRequest
+type NullableCaptivePortalNetwork struct {
+	value *CaptivePortalNetwork
 	isSet bool
 }
 
-func (v NullableUpdateAccountRequest) Get() *UpdateAccountRequest {
+func (v NullableCaptivePortalNetwork) Get() *CaptivePortalNetwork {
 	return v.value
 }
 
-func (v *NullableUpdateAccountRequest) Set(val *UpdateAccountRequest) {
+func (v *NullableCaptivePortalNetwork) Set(val *CaptivePortalNetwork) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableUpdateAccountRequest) IsSet() bool {
+func (v NullableCaptivePortalNetwork) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableUpdateAccountRequest) Unset() {
+func (v *NullableCaptivePortalNetwork) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableUpdateAccountRequest(val *UpdateAccountRequest) *NullableUpdateAccountRequest {
-	return &NullableUpdateAccountRequest{value: val, isSet: true}
+func NewNullableCaptivePortalNetwork(val *CaptivePortalNetwork) *NullableCaptivePortalNetwork {
+	return &NullableCaptivePortalNetwork{value: val, isSet: true}
 }
 
-func (v NullableUpdateAccountRequest) MarshalJSON() ([]byte, error) {
+func (v NullableCaptivePortalNetwork) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableUpdateAccountRequest) UnmarshalJSON(src []byte) error {
+func (v *NullableCaptivePortalNetwork) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }

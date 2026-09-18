@@ -15,60 +15,60 @@ import (
 	"fmt"
 )
 
-// checks if the UpdateAccountRequest type satisfies the MappedNullable interface at compile time
-var _ MappedNullable = &UpdateAccountRequest{}
+// checks if the PolicyIP type satisfies the MappedNullable interface at compile time
+var _ MappedNullable = &PolicyIP{}
 
-// UpdateAccountRequest struct for UpdateAccountRequest
-type UpdateAccountRequest struct {
-	License string `json:"license"`
+// PolicyIP struct for PolicyIP
+type PolicyIP struct {
+	Ip string `json:"ip"`
 	AdditionalProperties map[string]interface{}
 }
 
-type _UpdateAccountRequest UpdateAccountRequest
+type _PolicyIP PolicyIP
 
-// NewUpdateAccountRequest instantiates a new UpdateAccountRequest object
+// NewPolicyIP instantiates a new PolicyIP object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewUpdateAccountRequest(license string) *UpdateAccountRequest {
-	this := UpdateAccountRequest{}
-	this.License = license
+func NewPolicyIP(ip string) *PolicyIP {
+	this := PolicyIP{}
+	this.Ip = ip
 	return &this
 }
 
-// NewUpdateAccountRequestWithDefaults instantiates a new UpdateAccountRequest object
+// NewPolicyIPWithDefaults instantiates a new PolicyIP object
 // This constructor will only assign default values to properties that have it defined,
 // but it doesn't guarantee that properties required by API are set
-func NewUpdateAccountRequestWithDefaults() *UpdateAccountRequest {
-	this := UpdateAccountRequest{}
+func NewPolicyIPWithDefaults() *PolicyIP {
+	this := PolicyIP{}
 	return &this
 }
 
-// GetLicense returns the License field value
-func (o *UpdateAccountRequest) GetLicense() string {
+// GetIp returns the Ip field value
+func (o *PolicyIP) GetIp() string {
 	if o == nil {
 		var ret string
 		return ret
 	}
 
-	return o.License
+	return o.Ip
 }
 
-// GetLicenseOk returns a tuple with the License field value
+// GetIpOk returns a tuple with the Ip field value
 // and a boolean to check if the value has been set.
-func (o *UpdateAccountRequest) GetLicenseOk() (*string, bool) {
+func (o *PolicyIP) GetIpOk() (*string, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.License, true
+	return &o.Ip, true
 }
 
-// SetLicense sets field value
-func (o *UpdateAccountRequest) SetLicense(v string) {
-	o.License = v
+// SetIp sets field value
+func (o *PolicyIP) SetIp(v string) {
+	o.Ip = v
 }
 
-func (o UpdateAccountRequest) MarshalJSON() ([]byte, error) {
+func (o PolicyIP) MarshalJSON() ([]byte, error) {
 	toSerialize,err := o.ToMap()
 	if err != nil {
 		return []byte{}, err
@@ -76,9 +76,9 @@ func (o UpdateAccountRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(toSerialize)
 }
 
-func (o UpdateAccountRequest) ToMap() (map[string]interface{}, error) {
+func (o PolicyIP) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
-	toSerialize["license"] = o.License
+	toSerialize["ip"] = o.Ip
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -87,12 +87,12 @@ func (o UpdateAccountRequest) ToMap() (map[string]interface{}, error) {
 	return toSerialize, nil
 }
 
-func (o *UpdateAccountRequest) UnmarshalJSON(data []byte) (err error) {
+func (o *PolicyIP) UnmarshalJSON(data []byte) (err error) {
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
-		"license",
+		"ip",
 	}
 
 	allProperties := make(map[string]interface{})
@@ -109,58 +109,58 @@ func (o *UpdateAccountRequest) UnmarshalJSON(data []byte) (err error) {
 		}
 	}
 
-	varUpdateAccountRequest := _UpdateAccountRequest{}
+	varPolicyIP := _PolicyIP{}
 
-	err = json.Unmarshal(data, &varUpdateAccountRequest)
+	err = json.Unmarshal(data, &varPolicyIP)
 
 	if err != nil {
 		return err
 	}
 
-	*o = UpdateAccountRequest(varUpdateAccountRequest)
+	*o = PolicyIP(varPolicyIP)
 
 	additionalProperties := make(map[string]interface{})
 
 	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "license")
+		delete(additionalProperties, "ip")
 		o.AdditionalProperties = additionalProperties
 	}
 
 	return err
 }
 
-type NullableUpdateAccountRequest struct {
-	value *UpdateAccountRequest
+type NullablePolicyIP struct {
+	value *PolicyIP
 	isSet bool
 }
 
-func (v NullableUpdateAccountRequest) Get() *UpdateAccountRequest {
+func (v NullablePolicyIP) Get() *PolicyIP {
 	return v.value
 }
 
-func (v *NullableUpdateAccountRequest) Set(val *UpdateAccountRequest) {
+func (v *NullablePolicyIP) Set(val *PolicyIP) {
 	v.value = val
 	v.isSet = true
 }
 
-func (v NullableUpdateAccountRequest) IsSet() bool {
+func (v NullablePolicyIP) IsSet() bool {
 	return v.isSet
 }
 
-func (v *NullableUpdateAccountRequest) Unset() {
+func (v *NullablePolicyIP) Unset() {
 	v.value = nil
 	v.isSet = false
 }
 
-func NewNullableUpdateAccountRequest(val *UpdateAccountRequest) *NullableUpdateAccountRequest {
-	return &NullableUpdateAccountRequest{value: val, isSet: true}
+func NewNullablePolicyIP(val *PolicyIP) *NullablePolicyIP {
+	return &NullablePolicyIP{value: val, isSet: true}
 }
 
-func (v NullableUpdateAccountRequest) MarshalJSON() ([]byte, error) {
+func (v NullablePolicyIP) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.value)
 }
 
-func (v *NullableUpdateAccountRequest) UnmarshalJSON(src []byte) error {
+func (v *NullablePolicyIP) UnmarshalJSON(src []byte) error {
 	v.isSet = true
 	return json.Unmarshal(src, &v.value)
 }
