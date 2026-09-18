@@ -4,7 +4,6 @@ go 1.26.0
 
 require (
 	github.com/ViRb3/wgcf/v2 v2.3.0
-	github.com/ViRb3/wgcf/v2/openapi v0.0.0-00010101000000-000000000000
 	github.com/sagernet/sing v0.9.4
 	github.com/sagernet/sing-box v1.14.1
 )
@@ -33,7 +32,4 @@ require (
 	golang.org/x/tools v0.49.0 // indirect
 )
 
-// wgcf's generated OpenAPI package is not published as an independent module.
-// Its own replacement is not inherited by consumers, so use the matching source
-// tree as the replacement until wgcf publishes that module separately.
-replace github.com/ViRb3/wgcf/v2/openapi => ./third_party/wgcf-openapi
+replace github.com/ViRb3/wgcf/v2 => github.com/stek29/wgcf/v2 v2.3.1-0.20260918192232-e49d1bfdd54f
