@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ViRb3/wgcf/v2/openapi"
 )
 
 func testRegistration() Registration {
@@ -81,6 +83,27 @@ func TestParseEndpoint(t *testing.T) {
 		if host != test.host || port != test.port {
 			t.Fatalf("ParseEndpoint(%q) = %q, %d; want %q, %d", test.input, host, port, test.host, test.port)
 		}
+	}
+}
+
+func TestRegistrationFromConfigPreservesPeerPort(t *testing.T) {
+	host := "engage.cloudflareclient.com"
+	registration, err := registrationFromConfig(&openapi.Config{
+		ClientId: "AQID",
+		Interface: openapi.ConfigInterface{Addresses: openapi.NetworkAddress{
+			V4: "172.16.0.2",
+			V6: "2606:4700:110::2",
+		}},
+		Peers: []openapi.Peer{{
+			PublicKey: "peer-public-key",
+			Endpoint:  openapi.Endpoint{Host: &host, Ports: []int32{500}},
+		}},
+	}, "device-id", "access-token", "license-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := registration.Peers[0].Endpoint, "engage.cloudflareclient.com:500"; got != want {
+		t.Errorf("peer endpoint = %q, want %q", got, want)
 	}
 }
 
@@ -169,5 +192,55 @@ func TestWriteOutputsPermissionsAndForce(t *testing.T) {
 	}
 	if err := WriteOutputs(endpoint, NewState(testRegistration(), "private-key"), output, state, true); err != nil {
 		t.Fatalf("WriteOutputs with force: %v", err)
+	}
+}
+
+func TestLoadStateAndWriteEndpoint(t *testing.T) {
+	directory := t.TempDir()
+	statePath := filepath.Join(directory, "warp-state.json")
+	state := NewState(testRegistration(), "private-key")
+	content, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded, state) {
+		t.Errorf("LoadState() = %#v, want %#v", loaded, state)
+	}
+
+	output := filepath.Join(directory, "warp.json")
+	parsed, err := ParseRegistration(testRegistration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := NewEndpoint(parsed, loaded.PrivateKey, "warp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEndpoint(endpoint, output, false); err != nil {
+		t.Fatal(err)
+	}
+	stateAfter, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stateAfter) != string(content) {
+		t.Fatal("WriteEndpoint changed the recovery state")
+	}
+}
+
+func TestLoadStateRejectsInvalidState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "warp-state.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"device_id":"device"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadState(path); err == nil {
+		t.Fatal("LoadState accepted incomplete state")
 	}
 }

@@ -25,6 +25,38 @@ func NewState(registration Registration, privateKey string) State {
 	}
 }
 
+// LoadState reads a recovery-state file written by warpgen.
+func LoadState(path string) (State, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return State{}, fmt.Errorf("read WARP recovery state: %w", err)
+	}
+	var state State
+	if err := json.Unmarshal(content, &state); err != nil {
+		return State{}, fmt.Errorf("decode WARP recovery state: %w", err)
+	}
+	if err := state.Validate(); err != nil {
+		return State{}, err
+	}
+	return state, nil
+}
+
+func (state State) Validate() error {
+	if state.Version != 1 {
+		return fmt.Errorf("unsupported WARP recovery state version %d", state.Version)
+	}
+	if state.DeviceID == "" {
+		return fmt.Errorf("WARP recovery state has no device_id")
+	}
+	if state.AccessToken == "" {
+		return fmt.Errorf("WARP recovery state has no access_token")
+	}
+	if state.PrivateKey == "" {
+		return fmt.Errorf("WARP recovery state has no private_key")
+	}
+	return nil
+}
+
 // PrepareDestinationPaths catches predictable local errors before registering a
 // remote WARP device. Both files must either be new or explicitly forced.
 func PrepareDestinationPaths(force bool, paths ...string) error {
@@ -85,6 +117,19 @@ func WriteOutputs(endpoint Endpoint, state State, outputPath, statePath string, 
 		return fmt.Errorf("WARP state was written to %s, but writing endpoint failed: %w", statePath, err)
 	}
 	return nil
+}
+
+// WriteEndpoint writes a regenerated endpoint without changing its recovery
+// state. The state file is deliberately kept intact so it remains reusable.
+func WriteEndpoint(endpoint Endpoint, outputPath string, force bool) error {
+	if err := PrepareDestinationPaths(force, outputPath); err != nil {
+		return err
+	}
+	endpointJSON, err := json.MarshalIndent(endpoint, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode endpoint: %w", err)
+	}
+	return atomicWrite(outputPath, append(endpointJSON, '\n'))
 }
 
 func atomicWrite(path string, content []byte) (err error) {

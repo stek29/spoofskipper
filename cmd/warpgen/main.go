@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ViRb3/wgcf/v2/wireguard"
 	"github.com/stek29/spoofskipper/internal/warpgen"
@@ -28,8 +29,35 @@ func run(args []string) error {
 	detour := flags.String("detour", "", "optional outbound tag used to dial the WARP peer")
 	force := flags.Bool("force", false, "overwrite existing output and state files")
 	acceptTOS := flags.Bool("accept-tos", false, "accept Cloudflare WARP Terms of Service")
+	regenerate := flags.Bool("regenerate", false, "regenerate the endpoint from the existing recovery state")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *regenerate {
+		if filepath.Clean(*output) == filepath.Clean(*state) {
+			return errors.New("output and state paths must differ")
+		}
+		stateData, err := warpgen.LoadState(*state)
+		if err != nil {
+			return err
+		}
+		registration, err := warpgen.Refresh(stateData)
+		if err != nil {
+			return err
+		}
+		parsed, err := warpgen.ParseRegistration(registration)
+		if err != nil {
+			return err
+		}
+		endpoint, err := warpgen.NewEndpoint(parsed, stateData.PrivateKey, *tag, *detour)
+		if err != nil {
+			return err
+		}
+		if err := warpgen.WriteEndpoint(endpoint, *output, *force); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "WARP endpoint regenerated from %s and written to %s\n", *state, *output)
+		return nil
 	}
 	if !*acceptTOS {
 		return errors.New("--accept-tos is required before registering a WARP device")

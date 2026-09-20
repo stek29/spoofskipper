@@ -110,6 +110,20 @@ Run the command locally with Go, or remove `# ` from the first line to run it
 in Docker instead. The bind mount keeps the generated credential files on the
 host. The pinned `wgcf` v2.3.0 module requires Go 1.26 or newer.
 
+To refresh an endpoint for the same WARP device without registering another
+device, use the saved state file. This fetches the device's current connection
+parameters and rewrites only the endpoint; it leaves the recovery state intact.
+Use `--force` only if the endpoint file already exists.
+
+```sh
+go run ./cmd/warpgen \
+  --regenerate \
+  --state config/sing/local-warp-state.json \
+  --output config/sing/local-warp.json \
+  --detour proxy \
+  --force
+```
+
 `local-*.json` is ignored by Git. In `config/sing/config.jsonnet`, add the
 generated endpoint to `endpoints` with:
 
