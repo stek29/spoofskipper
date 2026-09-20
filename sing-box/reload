@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -eu
+
+CONFIG_TMPL="${CONFIG_TMPL:-/config/sing.jsonnet}"
+CONFIG_OUT="${CONFIG_OUT:-/tmp/sing.json}"
+jsonnet "${CONFIG_TMPL}" >"${CONFIG_OUT}"
+
+kill -HUP 1

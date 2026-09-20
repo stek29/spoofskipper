@@ -10,5 +10,5 @@ RUN set -eu \
     bash \
     ;
 
-COPY ./entrypoint /
+COPY ./entrypoint ./reload /
 ENTRYPOINT [ "/entrypoint" ]
