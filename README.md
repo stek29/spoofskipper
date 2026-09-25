@@ -260,9 +260,10 @@ docker compose run --rm -it --entrypoint blockcheck2 zapret
 ```
 
 to test over the same network as the deployment (e.g. with the macvlan override), stop `zapret` first
-(this also takes down `unbound` and `tayga`) so the static address is free, and pass the same compose files:
+so the static address is free, and pass the same compose files. `unbound` and `tayga` share the network
+of `zapret`, so stop them too, otherwise they're left in a stale network namespace after `zapret` restarts:
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.macvlan.yml stop zapret
+docker compose -f docker-compose.yml -f docker-compose.macvlan.yml stop zapret unbound tayga
 docker compose -f docker-compose.yml -f docker-compose.macvlan.yml run --rm -it --entrypoint blockcheck2 zapret
 docker compose -f docker-compose.yml -f docker-compose.macvlan.yml up -d
 ```

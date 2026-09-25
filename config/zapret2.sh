@@ -15,8 +15,7 @@ NFQWS2_OPTS=(
   --new --filter-tcp=443
   --lua-desync=wssize:wsize=1:scale=6
   --payload=tls_client_hello
-  --lua-desync=fake:blob=fake_default_tls:tcp_md5:ip_autottl=2,3-20:ip6_autottl=2,3-20:tls_mod=rnd,rndsni,padencap
-  --lua-desync=multisplit:pos=2
+  --lua-desync=multidisorder:pos=1,midsld
 
   # quic
   --new --filter-udp=443 --filter-l7=quic

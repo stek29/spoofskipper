@@ -1,3 +1,4 @@
 /docker-compose.*.yml
 !/docker-compose.build.yml
 __pycache__/
+/blockcheck/
