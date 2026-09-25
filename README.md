@@ -11,11 +11,14 @@ Provides DNS64 to use with Tayga
 
 NAT64 implemented in user-space with tun
 
-### [zapret](https://github.com/bol-van/zapret)
+### [zapret2](https://github.com/bol-van/zapret2)
 
 > A stand-alone (without 3rd party servers) DPI circumvention tool
 
-used in combination with unbound and tayga for some bypasses
+used in combination with unbound and tayga for some bypasses.
+`nfqws2` strategy is configured in `config/zapret2.sh` as the `NFQWS2_OPTS` array
+(profiles separated with `--new`, see the [zapret2 manual](https://github.com/bol-van/zapret2/blob/master/docs/manual.en.md)).
+extra global options (e.g. `--debug=1`) can be passed with the `NFQWS2_EXTRA_ARGS` env var.
 
 ### [sing-box](https://sing-box.sagernet.org)
 
@@ -223,9 +226,10 @@ images are built and published to GHCR from the pinned versions in `.env`.
 Each image uses a tag made from the upstream revision and the local package version:
 
 ```sh
-REVISION_ZAPRET=v72.12
-VERSION_ZAPRET=1
-# ghcr.io/stek29/spoofskipper/zapret:v72.12-1
+REVISION_ALPINE_IMAGE=3.24.2
+REVISION_ZAPRET2=v1.0.5.2
+VERSION_ZAPRET2=1
+# ghcr.io/stek29/spoofskipper/zapret2:v1.0.5.2-3.24.2-1
 ```
 
 Bump the matching `VERSION_*` when changing the local Dockerfile or entrypoint for an image.
@@ -248,6 +252,21 @@ or with overrides:
 docker compose -f docker-compose.yml -f docker-compose.macvlan.yml up -d
 ```
 
+### finding a strategy
+`blockcheck2` is bundled in the zapret2 image. run it in a one-off container, so the running
+`nfqws2` and its nftables rules don't interfere with the tests:
+```sh
+docker compose run --rm -it --entrypoint blockcheck2 zapret
+```
+
+to test over the same network as the deployment (e.g. with the macvlan override), stop `zapret` first
+(this also takes down `unbound` and `tayga`) so the static address is free, and pass the same compose files:
+```sh
+docker compose -f docker-compose.yml -f docker-compose.macvlan.yml stop zapret
+docker compose -f docker-compose.yml -f docker-compose.macvlan.yml run --rm -it --entrypoint blockcheck2 zapret
+docker compose -f docker-compose.yml -f docker-compose.macvlan.yml up -d
+```
+
 ## disclaimer
 This project is provided “as is”, without any warranties or liabilities. Use at your own risk.
 See LICENSE.
@@ -258,7 +277,7 @@ This project was inspired by the work of the following projects:
 - [Antizapret](https://antizapret.prostovpn.org) ([code](https://bitbucket.org/anticensority/workspace/repositories/))
 
 This project uses following projects and relies on them:
-- [bol-van/zapret](https://github.com/bol-van/zapret)
+- [bol-van/zapret2](https://github.com/bol-van/zapret2)
 - [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
 - [ViRb3/wgcf](https://github.com/ViRb3/wgcf)
 - [savely-krasovsky/antizapret-sing-box](https://github.com/savely-krasovsky/antizapret-sing-box)

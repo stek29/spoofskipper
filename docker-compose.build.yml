@@ -1,10 +1,10 @@
 services:
-  .zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$REVISION_ALPINE_IMAGE-$VERSION_ZAPRET
+  .zapret2:
+    image: ghcr.io/stek29/spoofskipper/zapret2:$REVISION_ZAPRET2-$REVISION_ALPINE_IMAGE-$VERSION_ZAPRET2
     build:
-      context: ./zapret
+      context: ./zapret2
       args:
-        REVISION: $REVISION_ZAPRET
+        REVISION: $REVISION_ZAPRET2
         BASE_VER: $REVISION_ALPINE_IMAGE
     deploy:
       replicas: 0

@@ -29,12 +29,24 @@
         "/^\\.env$/"
       ],
       "matchStrings": [
-        "REVISION_ZAPRET=(?<currentValue>\\S+)\\nVERSION_ZAPRET=\\d+"
+        "REVISION_ZAPRET2=(?<currentValue>\\S+)\\nVERSION_ZAPRET2=\\d+"
       ],
-      "depNameTemplate": "bol-van/zapret",
+      "depNameTemplate": "bol-van/zapret2",
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "loose",
-      "autoReplaceStringTemplate": "REVISION_ZAPRET={{{newValue}}}\nVERSION_ZAPRET=1"
+      "autoReplaceStringTemplate": "REVISION_ZAPRET2={{{newValue}}}\nVERSION_ZAPRET2=1"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^zapret2/Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG CURL_VERSION=(?<currentValue>\\S+)"
+      ],
+      "depNameTemplate": "stunnel/static-curl",
+      "datasourceTemplate": "github-releases",
+      "autoReplaceStringTemplate": "ARG CURL_VERSION={{{newValue}}}"
     },
     {
       "customType": "regex",
@@ -84,6 +96,14 @@
         "/^ghcr\\.io\\/stek29\\/spoofskipper\\//"
       ],
       "enabled": false
+    },
+    {
+      "matchPackageNames": [
+        "stunnel/static-curl"
+      ],
+      "prBodyNotes": [
+        "Bump `VERSION_ZAPRET2` in `.env` in this PR, otherwise no new zapret2 image is published."
+      ]
     }
   ]
 }

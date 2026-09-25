@@ -26,11 +26,11 @@ services:
       TAYGA_LOG: 'drop reject icmp self dyn'
 
   zapret:
-    image: ghcr.io/stek29/spoofskipper/zapret:$REVISION_ZAPRET-$REVISION_ALPINE_IMAGE-$VERSION_ZAPRET
+    image: ghcr.io/stek29/spoofskipper/zapret2:$REVISION_ZAPRET2-$REVISION_ALPINE_IMAGE-$VERSION_ZAPRET2
     environment: {}
-    #   NFQWS_DEFAULT_ARGS: '--debug' # example
+    #   NFQWS2_EXTRA_ARGS: '--debug=1' # example
     #   ZAPRET_PRERUN: 'ip r add default via 127.1.2.3'
-    command: "/config/zapret.sh"
+    command: "/config/zapret2.sh"
     restart: always
     privileged: true
     cap_add:

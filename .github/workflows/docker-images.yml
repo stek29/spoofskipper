@@ -27,10 +27,10 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - image: zapret
-            context: ./zapret
-            revision_var: REVISION_ZAPRET
-            version_var: VERSION_ZAPRET
+          - image: zapret2
+            context: ./zapret2
+            revision_var: REVISION_ZAPRET2
+            version_var: VERSION_ZAPRET2
             base_ver: REVISION_ALPINE_IMAGE
           - image: sing-box
             context: ./sing-box

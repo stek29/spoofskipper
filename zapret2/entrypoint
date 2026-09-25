@@ -1,0 +1,34 @@
+#!/usr/bin/dumb-init /bin/bash
+# shellcheck shell=bash
+set -euo pipefail
+
+/nftables.nft
+
+# shellcheck source=../config/zapret2.sh
+source "$1"
+
+if [ -n "${NFQWS_ARGS+x}${NFQWS_INSTANCES+x}" ]; then
+  echo "$1 uses zapret1 NFQWS_ARGS/NFQWS_INSTANCES; rewrite it as NFQWS2_OPTS for nfqws2" >&2
+  exit 1
+fi
+if [ -z "${NFQWS2_OPTS+x}" ]; then
+  echo "$1 does not define NFQWS2_OPTS" >&2
+  exit 1
+fi
+
+if [ -n "${ZAPRET_PRERUN:-}" ]; then
+  eval "${ZAPRET_PRERUN}"
+fi
+
+lua_init=()
+for lib in zapret-lib zapret-antidpi zapret-auto; do
+  lua_init+=("--lua-init=@${ZAPRET_BASE}/lua/${lib}.lua")
+done
+
+# global options such as --debug=1, word-split
+read -ra extra_args <<< "${NFQWS2_EXTRA_ARGS:-}"
+
+args=("${lua_init[@]}" "${extra_args[@]}" "${NFQWS2_OPTS[@]}")
+
+echo "starting: nfqws2 ${args[*]}"
+exec nfqws2 "${args[@]}"
