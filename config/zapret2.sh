@@ -4,7 +4,6 @@
 # lua libraries are loaded by the entrypoint.
 NFQWS2_OPTS=(
   --qnum=200
-  --blob=quic_dbank:@/config/zapret/quic_initial_dbankcloud_ru.bin
 
   # plain http
   --filter-tcp=80 --filter-l7=http
@@ -23,5 +22,5 @@ NFQWS2_OPTS=(
 
   # discord voice / stun
   --new --filter-udp=590-1400,3478-3497,19294-19344,50000-50100 --filter-l7=discord,stun
-  --lua-desync=fake:blob=quic_dbank:repeats=6
+  --lua-desync=fake:blob=fake_default_quic:repeats=6
 )
