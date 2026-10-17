@@ -16,7 +16,7 @@ RUN apk add --no-cache \
 ARG TARGETARCH
 ARG REVISION
 # static curl with HTTP/3 support, for blockcheck2 QUIC tests
-ARG CURL_VERSION=8.22.0
+ARG CURL_VERSION=8.23.0
 
 # zapret2: extract only needed files and move binaries to where blockcheck2 expects them:
 #  - nfqws2 and mdig binaries for target platform
