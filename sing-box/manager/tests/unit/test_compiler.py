@@ -67,10 +67,10 @@ class CompilerTests(unittest.TestCase):
             self.assertNotEqual(compiler.revision(first), compiler.revision(render(c)))
             self.assertEqual([p.name for p in Path(temp).iterdir()], ['config.jsonnet'])
 
-    def test_settings_stage1_guards(self):
+    def test_settings_observe_only_guards(self):
         with tempfile.TemporaryDirectory() as temp:
             self.assertFalse(load_settings(temp).get('probes_enabled', False))
-            for data in ({'probes_enabled': True}, {'managed_selectors': ['proxy_main']},
+            for data in ({'probes_enabled': 'yes'}, {'managed_selectors': ['proxy_main']},
                          {'provider_weights': {'a': -1}}, {'revision_timeout': 0}):
                 write_json(Path(temp) / 'local-manager.json', data)
                 with self.assertRaises(ValueError):

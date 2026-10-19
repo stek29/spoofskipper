@@ -84,3 +84,26 @@ class RealCoreTests(test_lifecycle.LifecycleTests):
         private.write_text('local changed = true;\n' + private.read_text().replace(compiler.IMPORT_LINE, 'local sub_data = {};'))
         result = run('render-check', self.root / 'bad-compare', ['--snapshots', str(scratch)])
         self.assertNotEqual(result.returncode, 0)
+
+
+    def test_disable_probes_reload_preserves_refresh_owner_and_selectors(self):
+        from test_lifecycle import free_port
+        self.settings.update(probes_enabled=True, probe_port=free_port(), probe_timeout=.3,
+                             gate_active_seconds=.2, gate_standby_seconds=.2)
+        write_json(self.config / 'local-manager.json', self.settings)
+        self.start()
+        self.ready()
+        wait_for(lambda: 'probe_failed' in self.logs())
+        pid = self.proc.pid
+        first = self.live()
+        selectors = [o for o in first['outbounds'] if o['type'] in ('selector', 'urltest')]
+        self.assertTrue(any(i['tag'] == compiler.PROBE_TAG for i in first['inbounds']))
+        before = self.requests
+        self.settings['probes_enabled'] = False
+        write_json(self.config / 'local-manager.json', self.settings)
+        self.proc.send_signal(signal.SIGHUP)
+        wait_for(lambda: not any(i.get('tag') == compiler.PROBE_TAG for i in self.live().get('inbounds', [])))
+        self.assertEqual(pid, self.proc.pid)
+        self.assertEqual(selectors, [o for o in self.live()['outbounds'] if o['type'] in ('selector', 'urltest')])
+        wait_for(lambda: self.requests > before)
+        self.assertIsNone(self.proc.poll())

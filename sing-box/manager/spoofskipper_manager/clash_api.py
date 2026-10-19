@@ -25,10 +25,14 @@ def credentials(config):
     return f'http://[{host}]:{port}' if ':' in host else f'http://{host}:{port}', secret
 
 
-def revision_present(config, tag, timeout=1):
+def proxies(config, timeout=1):
     base, secret = credentials(config)
     headers = {'Authorization': 'Bearer ' + secret} if secret else {}
     request = urllib.request.Request(base + '/proxies', headers=headers)
     # Local verification must never go through environment HTTP proxies.
     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout) as response:
-        return tag in json.load(response).get('proxies', {})
+        return json.load(response).get('proxies', {})
+
+
+def revision_present(config, tag, timeout=1):
+    return tag in proxies(config, timeout)

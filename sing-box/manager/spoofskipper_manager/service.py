@@ -11,6 +11,8 @@ from pathlib import Path
 from . import compiler, clash_api
 from .state import atomic_write, write_json, remove
 from .subscriptions import Providers
+from .scheduler import Scheduler
+from .probes import DEFAULTS as PROBE_DEFAULTS
 
 
 def log(event, **fields):
@@ -26,16 +28,37 @@ def load_settings(config_dir):
     settings = json.loads(path.read_text()) if path.exists() else {}
     if not isinstance(settings, dict):
         raise ValueError('manager settings must be an object')
-    if settings.get('probes_enabled', False) is not False or settings.get('managed_selectors', []):
-        raise ValueError('stage 1 requires probes disabled and no managed selectors')
+    if not isinstance(settings.get('probes_enabled', False), bool) or settings.get('managed_selectors', []):
+        raise ValueError('stage 2 requires boolean probes_enabled and no managed selectors')
     weights = settings.get('provider_weights', {})
     if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
             or not math.isfinite(w) or w <= 0 for w in weights.values()):
         raise ValueError('provider weights must be positive finite numbers')
-    for key, default in DEFAULTS.items():
+    for key, default in {**DEFAULTS, **PROBE_DEFAULTS}.items():
         value = settings.setdefault(key, default)
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
             raise ValueError('invalid manager deadline/cadence')
+    for key, maximum in (('probe_workers', 4), ('probe_port', 65535)):
+        if not isinstance(settings[key], int) or settings[key] > maximum:
+            raise ValueError('invalid probe worker count/port')
+    if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
+        raise ValueError('probe deadlines exceed bounded maximum')
+    for key in ('probe_url', 'probe_backup_url'):
+        if key in settings and not isinstance(settings[key], str):
+            raise ValueError('invalid probe URL')
+    if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
+        raise ValueError('probe_ca_bundle must be a file path')
+    if settings.get('probes_enabled', False):
+        import ssl
+        from urllib.parse import urlsplit
+        ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
+        for key, default in (('probe_url', 'https://speed.cloudflare.com/__down?bytes={bytes}'),
+                             ('probe_backup_url', 'https://proof.ovh.net/files/1Mb.dat')):
+            url = urlsplit(settings.get(key, default))
+            if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
+                raise ValueError('probe endpoint must be HTTPS')
+        if '{bytes}' not in settings.get('probe_url', '{bytes}'):
+            raise ValueError('probe_url requires {bytes}')
     return settings
 
 
@@ -67,6 +90,7 @@ class Manager:
         self.stopping = None
         self.reload_requested = False
         self.current = None
+        self.scheduler = Scheduler(log)
 
     def signal(self, number, _frame):
         if number == signal.SIGHUP:
@@ -147,6 +171,7 @@ class Manager:
         if self.current == config and self.alive():
             log('activation_unchanged', revision=compiler.revision(config))
             return
+        self.scheduler.invalidate()
         old = self.current
         if old is not None:
             atomic_write(self.previous, self.live.read_bytes())
@@ -189,7 +214,14 @@ class Manager:
 
     def prepare(self, snapshots, providers):
         with tempfile.TemporaryDirectory(prefix='.manager-', dir=self.root) as scratch:
-            return compiler.render(self.config_dir / 'sing.jsonnet', providers.merged(snapshots), scratch)
+            return compiler.render(self.config_dir / 'sing.jsonnet', providers.merged(snapshots), scratch,
+                                   self.settings, providers.candidates(snapshots))
+
+    def configure_probes(self, providers, snapshots):
+        # Hash the actual rendered definitions, including private overrides.
+        tags = {c['outbound']['tag']: c for c in providers.candidates(snapshots)}
+        candidates = [{**tags[o['tag']], 'outbound': o} for o in self.current.get('outbounds', []) if o['tag'] in tags]
+        self.scheduler.configure(self.current, candidates, self.settings)
 
     def run(self):
         for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
@@ -211,6 +243,7 @@ class Manager:
                 if providers.snapshots:
                     pending = dict(providers.snapshots)
                     self.activate(self.prepare(pending, providers))
+                    self.configure_probes(providers, pending)
                     pending = None
             except (Stopping, RecoveryFailed):
                 raise
@@ -246,6 +279,7 @@ class Manager:
                             continue
                         self.activate(self.prepare(pending, providers))
                         providers.commit(pending)
+                        self.configure_probes(providers, pending)
                         pending = None
                         backoff = self.settings['bootstrap_backoff_seconds']
                         if not reload_only:
@@ -261,6 +295,7 @@ class Manager:
                             # Retain fetched snapshots in memory: runtime retries do not refetch.
                             self.wait(backoff)
                             backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
+                self.scheduler.tick()
                 self.wait(0.1)
         except Stopping:
             log('shutdown_requested', signal=self.stopping)
@@ -268,6 +303,7 @@ class Manager:
         except RecoveryFailed:
             return 1
         finally:
+            self.scheduler.close()
             self.stop_child()
             # Reap any orphaned descendants when running as container PID 1.
             while True:

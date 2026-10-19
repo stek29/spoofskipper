@@ -1,6 +1,6 @@
 services:
   tests:
-    image: spoofskipper-manager:stage1
+    image: spoofskipper-manager:stage2
     user: '65534:65534'
     entrypoint: ['python3', '-m', 'unittest', 'discover', '-s', '/opt/manager/tests/integration', '-v']
     environment:

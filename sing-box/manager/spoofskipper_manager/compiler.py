@@ -57,7 +57,7 @@ def revision(config):
     return tags[0]
 
 
-def render(template, subscriptions, scratch):
+def render(template, subscriptions, scratch, settings=None, candidates=()):
     private = Path(template).parent / 'config.jsonnet'
     if private.read_text().splitlines().count(EXTVAR_LINE) != 1 or IMPORT_LINE in private.read_text():
         raise ValueError('private config requires documented subscription extVar edit')
@@ -73,6 +73,7 @@ def render(template, subscriptions, scratch):
         config = json.loads(result.stdout)
     finally:
         ext.unlink(missing_ok=True)
+    add_probe_routes(config, settings or {}, candidates)
     validate(config)
     if any(o['tag'].startswith(REVISION_PREFIX) for o in config.get('outbounds', [])):
         raise ValueError('reserved revision tag prefix')
@@ -90,3 +91,31 @@ def check(config, scratch, core='sing-box'):
             raise ValueError('sing-box check failed (diagnostics suppressed to protect secrets)')
     finally:
         path.unlink(missing_ok=True)
+
+
+PROBE_TAG = '__spoofskipper_probe'
+
+
+def probe_outbounds(config, candidates):
+    tags = {c['outbound']['tag'] for c in candidates}
+    tags.update(o['tag'] for o in config.get('endpoints', []) if o.get('detour') == 'warp_upstream')
+    return [o for o in config.get('outbounds', []) + config.get('endpoints', []) if o['tag'] in tags]
+
+
+def add_probe_routes(config, settings, candidates):
+    if not settings.get('probes_enabled', False):
+        return
+    from .probes import identity
+    if any(i.get('tag') == PROBE_TAG for i in config.get('inbounds', [])):
+        raise ValueError('reserved probe inbound tag')
+    outbounds = probe_outbounds(config, candidates)
+    config.setdefault('inbounds', []).append({
+        'type': 'mixed', 'tag': PROBE_TAG, 'listen': '127.0.0.1',
+        'listen_port': settings.get('probe_port', 19090),
+        'users': [{'username': identity(o)[0], 'password': identity(o)[1]} for o in outbounds]})
+    # First rules prevent production routing from shadowing authenticated probes.
+    rules = [{'inbound': [PROBE_TAG], 'auth_user': [identity(o)[0]],
+              'action': 'route', 'outbound': o['tag']} for o in outbounds]
+    rules.append({'inbound': [PROBE_TAG], 'action': 'reject'})
+    route = config.setdefault('route', {})
+    route['rules'] = rules + route.get('rules', [])
