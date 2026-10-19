@@ -66,8 +66,13 @@ local default_config = {
 
   // outbound to use for tun traffic
   tun_outbound: 'direct',
-  // detour tag to use for geosites
-  gs_detour: 'direct',
+  // HTTP client (shared tag or inline options) to use for geosites
+  gs_http_client: 'direct',
+  // explicit default client for remote rule-set downloads (sing-box 1.14+)
+  http_clients: [
+    { tag: 'direct', detour: 'direct' },
+  ],
+  default_http_client: 'direct',
   // extra endpoints
   endpoints: [],
   // extra outbounds
@@ -102,7 +107,7 @@ local default_config = {
       type: 'remote',
       format: 'binary',
       url: 'https://github.com/savely-krasovsky/antizapret-sing-box/releases/latest/download/antizapret.srs',
-      download_detour: 'direct',
+      http_client: 'direct',
     },
   ],
 
@@ -127,7 +132,7 @@ local geosite_rule_sets = [
     type: 'remote',
     format: 'binary',
     url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-%s.srs' % geosite_name,
-    download_detour: config.gs_detour,
+    http_client: config.gs_http_client,
   }
   for geosite_name in std.uniq(std.sort(
     config.proxy_geosites + config.zapret_geosites
@@ -142,6 +147,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
 
 {
   log: config.log,
+  http_clients: config.http_clients,
   dns: {
     servers: [
       config.default_dns {
@@ -226,6 +232,7 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
            ],
     rule_set: config.extra_rule_sets + geosite_rule_sets,
     auto_detect_interface: true,
+    default_http_client: config.default_http_client,
     default_domain_resolver: {
       server: 'default',
     },

@@ -38,10 +38,12 @@ example config
 // config/sing/config.jsonnet
 {
   default_dns: {
-    address: 'https://77.88.8.8/dns-query',
+    type: 'https',
+    server: '77.88.8.8',
   },
   zapret_dns: {
-    address: '192.168.1.2',
+    type: 'udp',
+    server: '192.168.1.2',
   },
 
   tun_outbound: 'proxy',
@@ -84,11 +86,19 @@ example config
       type: 'remote',
       format: 'binary',
       url: 'https://github.com/savely-krasovsky/antizapret-sing-box/releases/latest/download/antizapret.srs',
-      download_detour: 'direct',
+      http_client: 'direct',
     },
   ],
 }
 ```
+
+Requires sing-box 1.14 or newer. Remote rule-sets use `http_client` instead of
+`download_detour`, as described in the [sing-box rule-set reference](https://sing-box.sagernet.org/configuration/rule-set/).
+The template defines a shared `direct` HTTP client and selects it with
+`route.default_http_client`. To download geosites through a proxy, set
+`gs_http_client: { detour: 'proxy' }` in `config/sing/config.jsonnet`; use the same
+`http_client: { detour: 'proxy' }` on additional remote rule-sets.
+Shared clients can be customized with `http_clients` and `default_http_client`.
 
 ### WARP WireGuard endpoint
 
