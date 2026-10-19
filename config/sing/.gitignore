@@ -1,2 +1,3 @@
 /config.jsonnet
 /local-*.json
+/config.jsonnet.*

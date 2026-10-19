@@ -1,12 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 set -eu
-
-CONFIG_TMPL="${CONFIG_TMPL:-/config/sing.jsonnet}"
-CONFIG_OUT="${CONFIG_OUT:-/tmp/sing.json}"
-jsonnet "${CONFIG_TMPL}" >"${CONFIG_OUT}"
-
-if [ -n "${ZAPRET_PRERUN:-}" ]; then
-    eval "${ZAPRET_PRERUN}"
-fi
-
-exec sing-box "$@"
+export PYTHONPATH=/opt/manager
+exec python3 -m spoofskipper_manager "$@"
