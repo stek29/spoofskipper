@@ -1,5 +1,6 @@
 """Offline test-CA HTTPS faults through the pinned core and real protocol servers."""
 import base64
+import copy
 import http.server
 import json
 import shutil
@@ -12,6 +13,7 @@ import time
 import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
+from unittest.mock import Mock, patch
 
 from test_lifecycle import free_port, wait_for, FIXTURES
 from spoofskipper_manager import compiler, clash_api
@@ -102,7 +104,19 @@ class ProbeIntegrationTests(unittest.TestCase):
                          'throughput_seconds': 2, 'probe_ca_bundle': str(FIXTURES/'probe-ca.pem'),
                          'probe_url': f'https://localhost:{self.server.server_port}/__down?bytes={{bytes}}',
                          'probe_backup_url': f'https://localhost:{self.server.server_port}/backup'}
-        self.outbound = {'type': 'direct', 'tag': 'candidate'}
+        relay_port = free_port()
+        self.core({'log': {'disabled': True}, 'inbounds': [{'type': 'socks',
+            'listen': '127.0.0.1', 'listen_port': relay_port}],
+            'outbounds': [{'type': 'direct', 'tag': 'egress'}]})
+        def relay_ready():
+            try:
+                socket.create_connection(('127.0.0.1', relay_port), timeout=.1).close()
+                return True
+            except OSError:
+                return False
+        wait_for(relay_ready)
+        self.outbound = {'type': 'socks', 'tag': 'candidate', 'server': '127.0.0.1',
+                         'server_port': relay_port}
         self.config = {'log': {'disabled': True}, 'outbounds': [self.outbound],
             'experimental': {'clash_api': {'external_controller': '127.0.0.1:'+str(free_port())}}}
         self.start_client([self.outbound])
@@ -154,6 +168,115 @@ class ProbeIntegrationTests(unittest.TestCase):
         self.assertEqual(self.served, 1+THROTTLE)
         self.assertGreater(counts['received'], counts['body_received'])
         self.assertGreater(counts['sent'], 0)
+
+    def test_generic_static_socks_chain_tracks_arbitrary_selector(self):
+        from spoofskipper_manager.scheduler import Scheduler
+        from spoofskipper_manager.probes import sample_key
+        chained = {**self.outbound, 'tag': 'double-hop', 'detour': 'hop'}
+        blocked = {**self.outbound, 'tag': 'offline', 'server_port': free_port()}
+        config = {'log': {'disabled': True}, 'outbounds': [self.outbound, blocked,
+            {'type': 'selector', 'tag': 'hop', 'outbounds': ['candidate', 'offline']}, chained],
+            'experimental': {'clash_api': {'external_controller': '127.0.0.1:'+str(free_port())}}}
+        settings = {**self.settings, 'probe_port': free_port(), 'probes_enabled': True}
+        compiler.add_probe_routes(config, settings, [])
+        self.core(config)
+        def ready():
+            try:
+                return bool(clash_api.proxies(config))
+            except OSError:
+                return False
+        wait_for(ready)
+        scheduler = Scheduler(lambda *args, **kw: None)
+        scheduler.configure(config, [], settings)
+        key = sample_key(chained)
+        try:
+            scheduler.inspect()
+            result, valid = scheduler.perform(scheduler.client, config, scheduler.candidates[key], 'throttle')
+            self.assertTrue(valid)
+            self.assertTrue(result['ok'], result)
+            scheduler.accept(key, 'throttle', result, time.monotonic())
+            self.assertTrue(scheduler.samples[key].healthy)
+            clash_api.select(config, 'hop', 'offline', ['hop'])
+            scheduler.inspect()
+            self.assertIsNone(scheduler.samples[key].healthy)
+            result, valid = scheduler.perform(scheduler.client, config, scheduler.candidates[key], 'gate')
+            self.assertTrue(valid)
+            self.assertFalse(result['ok'])
+            clash_api.select(config, 'hop', 'candidate', ['hop'])
+            scheduler.inspect()
+            self.assertTrue(scheduler.client.run(chained, 'gate')['ok'])
+        finally:
+            scheduler.close()
+
+    def test_confirmed_body_failure_survives_real_head_success(self):
+        from spoofskipper_manager.scheduler import Scheduler
+        from spoofskipper_manager.probes import sample_key
+        scheduler = Scheduler(lambda *args, **kw: None)
+        scheduler.configure(self.config, [{'provider': 'p', 'weight': 1, 'outbound': self.outbound}],
+                            {**self.settings, 'probes_enabled': True})
+        key = sample_key(self.outbound)
+        try:
+            self.mode = 'freeze'
+            scheduler.accept(key, 'throttle', self.client.run(self.outbound, 'throttle'), time.monotonic())
+            scheduler.accept(key, 'corroborate_body', self.client.corroborate(self.outbound, body=True), time.monotonic())
+            self.assertFalse(scheduler.samples[key].healthy)
+            self.mode = 'stall'
+            for _ in range(3):
+                scheduler.accept(key, 'gate', self.client.run(self.outbound, 'gate'), time.monotonic())
+            result = self.client.corroborate(self.outbound)
+            self.assertTrue(result['ok'])
+            scheduler.accept(key, 'corroborate_gate', result, time.monotonic())
+            self.assertFalse(scheduler.samples[key].healthy)
+            self.mode = 'ok'
+            scheduler.accept(key, 'corroborate_body', self.client.corroborate(self.outbound, body=True), time.monotonic())
+            self.assertTrue(scheduler.samples[key].healthy)
+            self.assertTrue(scheduler.samples[key].body_failed)
+        finally:
+            scheduler.close()
+
+    def test_snapshot_commit_failure_keeps_real_probes_on_new_core(self):
+        from spoofskipper_manager import service
+        from spoofskipper_manager.probes import sample_key
+        config_dir = self.root/'manager-config'
+        config_dir.mkdir()
+        manager = service.Manager(config_dir, self.root/'manager-state')
+        settings = {**manager.settings, **self.settings, 'probes_enabled': True, 'probe_port': free_port()}
+        manager.settings = settings
+        old = {'log': {'disabled': True}, 'outbounds': [self.outbound],
+            'experimental': {'clash_api': {'external_controller': '127.0.0.1:'+str(free_port()), 'secret': 'old'}}}
+        candidates = [{'provider': 'p', 'weight': 1, 'outbound': self.outbound}]
+        compiler.add_probe_routes(old, settings, candidates)
+        old['outbounds'].append({'type': 'direct', 'tag': compiler.REVISION_PREFIX+'old'})
+        new = copy.deepcopy(old)
+        new['experimental']['clash_api']['secret'] = 'rotated'
+        new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX+'new'
+        providers = Mock(snapshots={'p': {}}, candidates=Mock(return_value=candidates))
+        providers.refresh.return_value = {'p': {}}
+        providers.commit.side_effect = OSError('snapshot write failed')
+        tested = False
+        real_wait = manager.wait
+        def tick():
+            nonlocal tested
+            self.assertEqual(manager.current, new)
+            self.assertEqual(manager.scheduler.config, new)
+            self.assertFalse(manager.scheduler.client.cancelled.is_set())
+            self.assertIn(compiler.revision(new), manager.scheduler.inspect())
+            result = manager.scheduler.client.run(self.outbound, 'gate')
+            self.assertTrue(result['ok'], result)
+            key = sample_key(self.outbound)
+            manager.scheduler.accept(key, 'gate', result, time.monotonic())
+            self.assertTrue(manager.scheduler.samples[key].healthy)
+            tested = True
+        def wait(seconds):
+            if tested:
+                raise service.Stopping()
+            real_wait(seconds)
+        with patch.object(service.signal, 'signal'), patch.object(service, 'Providers', return_value=providers), \
+             patch.object(service, 'load_settings', return_value=settings), \
+             patch.object(manager, 'prepare', side_effect=[old, new]), \
+             patch.object(manager.scheduler, 'tick', side_effect=tick), patch.object(manager, 'wait', side_effect=wait):
+            self.assertEqual(manager.run(), 0)
+        self.assertTrue(tested)
 
     def test_freeze_truncation_slow_completion_and_throughput_early_stop(self):
         for mode in ('freeze', 'truncate'):

@@ -15,7 +15,7 @@ class SchedulingTests(unittest.TestCase):
         self.now = 100.
         self.logs = []
         self.scheduler = Scheduler(lambda event, **kw: self.logs.append((event, kw)), clock=lambda: self.now)
-        self.candidates = [{'provider': 'p', 'weight': 1.25, 'outbound': {'type': 'direct', 'tag': 'c'+str(i)}} for i in range(6)]
+        self.candidates = [{'provider': 'p', 'weight': 1.25, 'outbound': {'type': 'trojan', 'tag': 'c'+str(i)}} for i in range(6)]
         self.config = {'outbounds': [c['outbound'] for c in self.candidates]}
         self.scheduler.configure(self.config, self.candidates, {'probes_enabled': True})
         self.scheduler.last_inspect = self.now
@@ -67,7 +67,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertTrue(any(e == 'probe_discarded' for e, _ in self.logs))
         changed = copy.deepcopy(self.candidates)
         changed[0]['outbound']['bind_interface'] = 'new'
-        self.scheduler.configure(self.config, changed, {'probes_enabled': True})
+        self.scheduler.configure({'outbounds': [c['outbound'] for c in changed]}, changed, {'probes_enabled': True})
         self.assertNotIn(key, self.scheduler.samples)
         self.complete()
 
@@ -113,12 +113,15 @@ class SchedulingTests(unittest.TestCase):
         self.assertFalse(sample.body_failed)
         self.assertIsNone(score(sample, 1, self.now, 7200))
 
-    def test_warp_changed_upstream_discards(self):
+    def test_chained_changed_upstream_discards(self):
         class Client:
             def run(self, *_):
                 return {'ok': True}
-        with patch('spoofskipper_manager.scheduler.clash_api.proxies', side_effect=[{'warp_upstream': {'now': 'a'}}, {'warp_upstream': {'now': 'b'}}]):
-            _, valid = self.scheduler.perform(Client(), {}, {'provider': 'WARP', 'outbound': {}}, 'gate')
+        config = {'outbounds': [{'type': 'direct', 'tag': tag} for tag in ('a', 'b')] +
+                  [{'type': 'selector', 'tag': 'chained_upstream', 'outbounds': ['a', 'b']}]}
+        with patch('spoofskipper_manager.scheduler.clash_api.proxies', side_effect=[{'chained_upstream': {'now': 'a'}}, {'chained_upstream': {'now': 'b'}}]):
+            config['endpoints'] = [{'type': 'wireguard', 'tag': 'tunnel', 'detour': 'chained_upstream'}]
+            _, valid = self.scheduler.perform(Client(), config, {'provider': 'tunnel', 'outbound': config['endpoints'][0]}, 'gate')
         self.assertFalse(valid)
 
     def test_accounting_hour_today(self):
@@ -157,17 +160,19 @@ class SchedulingTests(unittest.TestCase):
         self.assertIsNone(self.scheduler.next_test(key, [], self.now))
 
 
-    def test_proposed_main_includes_warp_but_upstream_excludes_it(self):
-        warp = {'type': 'wireguard', 'tag': 'warp', 'detour': 'warp_upstream'}
-        config = {'outbounds': self.config['outbounds'], 'endpoints': [warp]}
+    def test_proposed_main_includes_chained_but_upstream_excludes_it(self):
+        chained = {'type': 'wireguard', 'tag': 'chained', 'detour': 'chained_upstream'}
+        config = {'outbounds': self.config['outbounds'] + [
+            {'type': 'selector', 'tag': 'proxy_main', 'outbounds': ['c0', 'chained']},
+            {'type': 'selector', 'tag': 'chained_upstream', 'outbounds': ['c0']}], 'endpoints': [chained]}
         self.scheduler.configure(config, self.candidates, {'probes_enabled': True})
         for key, sample in self.scheduler.samples.items():
             sample.healthy, sample.latency = True, 20
-            sample.successes = [(self.now, 50 if key[0] == 'warp' else 1, 20)]
+            sample.successes = [(self.now, 50 if key[0] == 'chained' else 1, 20)]
         self.scheduler.summary(self.now)
         choices = self.logs[-1][1]['selectors']
-        self.assertEqual(choices['proxy_main']['proposed'], 'warp')
-        self.assertNotEqual(choices['warp_upstream']['proposed'], 'warp')
+        self.assertEqual(choices['proxy_main']['proposed'], 'chained')
+        self.assertNotEqual(choices['chained_upstream']['proposed'], 'chained')
 
 
     def test_active_warmup_does_not_wait_after_throttle(self):

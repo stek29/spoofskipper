@@ -1,19 +1,20 @@
-"""Observe-only scheduling. Work is in memory and never catches up missed ticks."""
+"""Bounded measurements and serialized policy writes; no catch-up ticks."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-import statistics
 import time
 import weakref
 from . import clash_api
-from .probes import Accounting, DEFAULTS, ProbeClient, sample_key
-
-SELECTORS = ('proxy_main', 'proxy_deepmind', 'warp_upstream')
+from .probes import Accounting, DEFAULTS, THROTTLE, ProbeClient, sample_key
+from .policy import Policy, score
+from .compiler import probe_outbounds, selectors, selector_members
 
 
 @dataclass
 class Sample:
     latency: float | None = None
     healthy: bool | None = None
+    healthy_at: float = float('-inf')
+    throttle_at: float = float('-inf')
     failures: int = 0
     body_failed: bool = False
     corroborate: str | None = None
@@ -35,13 +36,23 @@ def resolve(proxies, tag):
     return tag
 
 
-def score(sample, weight, now, max_age):
-    recent = [(rate, latency) for at, rate, latency in sample.successes if now-at <= max_age]
-    if not recent or sample.healthy is not True or sample.body_failed:
-        return None
-    rate = statistics.median(rate for rate, _ in recent[-3:])
-    latency = statistics.median(latency for _, latency in recent[-3:])
-    return weight * (min(rate, 50)/10)**.6 * (200/max(latency, 20))**.4
+def path_identity(config, proxies, tag):
+    """Rendered candidate identity including selected groups and recursive detours."""
+    entries = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
+    def visit(tag, seen):
+        if tag in seen or tag not in entries:
+            raise ValueError('invalid upstream dependency')
+        entry = entries[tag]
+        dependencies = []
+        if entry.get('type') in ('selector', 'urltest'):
+            selected = proxies.get(tag, {}).get('now')
+            if selected not in entry['outbounds']:
+                raise ValueError('upstream selection unavailable')
+            dependencies.append(selected)
+        if entry.get('detour'):
+            dependencies.append(entry['detour'])
+        return sample_key(entry), tuple(visit(member, seen | {tag}) for member in dependencies)
+    return visit(tag, set())
 
 
 class Scheduler:
@@ -51,30 +62,85 @@ class Scheduler:
         self.samples, self.candidates, self.jobs = {}, {}, {}
         self.epoch, self.config, self.settings = 0, None, dict(DEFAULTS)
         self.started = clock()
-        self.warp_version, self.warp_upstream = 0, None
+        self.paths, self.path_versions, self.proxy_choices = {}, {}, {}
         self.active, self.last_inspect, self.last_summary = {}, float('-inf'), clock()
         self.accounting = Accounting()
         self.client = None
         self.clients = weakref.WeakSet()
+        self.policy = Policy()
+        self.requested = {}
+        self.last_decisions = {}
 
     def configure(self, config, candidates, settings):
         self.epoch += 1
         self.config, self.settings = config, {**DEFAULTS, **settings}
         enabled = settings.get('probes_enabled', False)
-        entries = list(candidates) if enabled else []
-        warp = next((o for o in config.get('endpoints', []) + config.get('outbounds', []) if o.get('detour') == 'warp_upstream'), None)
-        if warp and enabled:
-            entries.append({'provider': 'WARP', 'weight': 1.0, 'outbound': warp})
+        subscribed = {c['outbound']['tag']: c for c in candidates}
+        entries = []
+        if enabled:
+            for outbound in probe_outbounds(config):
+                tag = outbound['tag']
+                entry = dict(subscribed.get(tag, {'provider': tag,
+                    'weight': settings.get('provider_weights', {}).get(tag, 1.0)}))
+                entry['outbound'] = outbound
+                entries.append(entry)
         self.candidates = {sample_key(c['outbound']): c for c in entries}
         self.samples = {k: self.samples.get(k, Sample()) for k in self.candidates}
+        self.update_paths(self.proxy_choices)
         self.client = ProbeClient(self.settings, accounting=self.accounting) if enabled else None
         if self.client:
             self.clients.add(self.client)
         self.last_inspect = float('-inf')
 
+    def restrict(self, settings):
+        """Apply revocations now; new ownership/probes require a checked render."""
+        old = self.settings.get('managed_selectors', [])
+        allowed = [tag for tag in old if tag in settings.get('managed_selectors', [])]
+        self.settings = {**self.settings, 'managed_selectors': allowed}
+        for tag in set(old) - set(allowed):
+            self.policy.choices.pop(tag, None)
+            self.policy.switched_at.pop(tag, None)
+            self.policy.pending.pop(tag, None)
+            self.last_decisions.pop(tag, None)
+        if not settings.get('probes_enabled', False):
+            if self.client is not None or self.jobs:
+                self.invalidate()
+            self.client = None
+            self.settings['probes_enabled'] = False
+        self.requested = {}
+
+    def update_paths(self, proxies):
+        paths = {}
+        for key in self.candidates:
+            try:
+                path = path_identity(self.config, proxies, key[0])
+            except ValueError:
+                path = None  # Unknown selection cannot retain trusted evidence.
+            if key in self.paths and (path is None or path != self.paths[key]):
+                self.samples[key] = Sample()
+                self.path_versions[key] = self.path_versions.get(key, 0) + 1
+            paths[key] = path
+        self.paths = paths
+        self.path_versions = {k: self.path_versions.get(k, 0) for k in paths}
+
     def invalidate(self):
-        # Called before HUP/restart; even rollback must discard crossing probes.
+        # Quiesce before core reloads or dependent selector writes. Cancellation
+        # closes active sockets; wait for workers before touching their routes.
         self.epoch += 1
+        for client in self.clients:
+            client.cancel()
+        for future in self.jobs:
+            future.cancel()
+        for future in self.jobs:
+            try:
+                future.result()
+            except Exception:
+                pass
+        self.jobs.clear()
+
+    def restart_client(self):
+        self.client = ProbeClient(self.settings, accounting=self.accounting)
+        self.clients.add(self.client)
 
     def close(self):
         self.invalidate()
@@ -92,42 +158,43 @@ class Scheduler:
 
     def inspect(self):
         proxies = clash_api.proxies(self.config)
-        self.active = {tag: resolve(proxies, tag) for tag in SELECTORS if tag in proxies}
-        upstream = self.active.get('warp_upstream')
-        if self.warp_upstream is not None and upstream != self.warp_upstream:
-            self.warp_version += 1
-            for key, candidate in self.candidates.items():
-                if candidate['provider'] == 'WARP':
-                    self.samples[key] = Sample()
-        self.warp_upstream = upstream
+        self.active = {tag: resolve(proxies, tag) for tag in selectors(self.config) if tag in proxies}
+        self.update_paths(proxies)
+        self.proxy_choices = proxies
         return proxies
 
     def perform(self, client, config, candidate, kind):
         outbound = candidate['outbound']
-        warp = candidate['provider'] == 'WARP'
-        version = self.warp_version
-        before = resolve(clash_api.proxies(config), 'warp_upstream') if warp else None
+        key = sample_key(outbound)
+        version = self.path_versions.get(key, 0)
+        dependent = bool(outbound.get('detour'))
+        before = path_identity(config, clash_api.proxies(config), outbound['tag']) if dependent else key
         result = client.corroborate(outbound, body=kind == 'corroborate_body') if kind.startswith('corroborate') else client.run(outbound, kind)
-        after = resolve(clash_api.proxies(config), 'warp_upstream') if warp else None
+        after = path_identity(config, clash_api.proxies(config), outbound['tag']) if dependent else key
         result['completed_at'] = self.clock()
-        return result, before == after and (not warp or version == self.warp_version)
+        return result, before == after and version == self.path_versions.get(key, 0)
 
     def accept(self, key, kind, result, now):
         sample = self.samples[key]
         if kind == 'corroborate_gate' or kind == 'corroborate_body':
             if not result['ok']:
                 sample.healthy = False
-            else:
+            elif kind == 'corroborate_body' or not sample.body_failed:
                 sample.healthy = True
+                sample.healthy_at = now
             self.log('probe_corroboration', candidate=key[0], kind=kind, ok=result['ok'])
             return
         if result.get('latency_ms') is not None:
             sample.latency = result['latency_ms']
         if result['ok']:
             sample.failures = 0
-            if not sample.body_failed or kind in ('throttle', 'throughput'):
+            body_ok = kind == 'throttle' or (kind == 'throughput' and
+                (result.get('mbps') is not None or result.get('bytes', 0) >= THROTTLE))
+            if not sample.body_failed or body_ok:
                 sample.healthy = True
+                sample.healthy_at = now
             if kind == 'throttle':
+                sample.throttle_at = now
                 sample.body_failed = False
             if kind == 'throughput' and result.get('mbps') is not None:
                 sample.body_failed = False
@@ -136,6 +203,7 @@ class Scheduler:
             sample.failures += 1
             if kind != 'gate':
                 sample.body_failed = True
+                sample.healthy = None
                 sample.corroborate = 'corroborate_body'
             elif sample.failures >= 3:
                 sample.corroborate = 'corroborate_gate'
@@ -191,6 +259,7 @@ class Scheduler:
             except Exception as exc:
                 self.log('probe_inspection_failed', error=type(exc).__name__)
             self.last_inspect = now
+        self.apply_policy(now)
         if now-self.last_summary >= 3600:
             self.summary(now)
             self.last_summary = now
@@ -198,12 +267,12 @@ class Scheduler:
         gates = sum(kind == 'gate' for _, kind, _ in self.jobs.values())
         downloading = any(kind != 'gate' for _, kind, _ in self.jobs.values())
         shortlists = self.shortlist(now)
-        ordered = sorted(self.candidates, key=lambda k: (k[0] not in self.active.values(), self.samples[k].latency or float('inf'), k))
+        ordered = sorted(self.candidates, key=lambda k: (k not in self.requested, k[0] not in self.active.values(), self.samples[k].latency or float('inf'), k))
         for key in ordered:
             if key in busy:
                 continue
             candidate, sample = self.candidates[key], self.samples[key]
-            kind = self.next_test(key, shortlists.get(candidate['provider'], []), now)
+            kind = self.requested.get(key) or self.next_test(key, shortlists.get(candidate['provider'], []), now)
             if kind is None or (kind == 'gate' and gates >= self.settings['probe_workers']) or (kind != 'gate' and downloading):
                 continue
             if kind == 'gate':
@@ -211,18 +280,72 @@ class Scheduler:
             else:
                 downloading = True
             sample.last[kind] = now
+            if key in self.requested:
+                self.accounting.add(policy_tests=1, **({'challenger_tests': 1} if kind == 'throughput' else {}))
             if kind.startswith('corroborate'):
                 sample.corroborate = None
             future = self.pool.submit(self.perform, self.client, self.config, candidate, kind)
             self.jobs[future] = (key, kind, self.epoch)
 
+    def apply_policy(self, now):
+        self.requested = {}
+        managed = self.settings.get('managed_selectors', [])
+        for selector in selectors(self.config):
+            if selector not in managed or selector not in self.active:
+                continue
+            members = selector_members(self.config, selector)
+            decision = self.policy.decide(selector, self.active[selector], self.candidates,
+                self.samples, now, self.settings, members)
+            pending = self.policy.pending.get(selector)
+            for key, kind in decision.tests:
+                last = self.samples[key].last.get(kind, float('-inf'))
+                # Retry failed/unknown challenges at the early-test cadence,
+                # rather than hammering an unscored or unreachable candidate.
+                since = pending[1] if pending and pending[0] == key else now
+                interval = self.settings['gate_active_seconds'] if kind == 'gate' else self.settings['early_test_seconds']
+                if (kind != 'gate' and last < since) or now-last >= interval:
+                    self.requested.setdefault(key, kind)
+            target = decision.target
+            compared = []
+            for tag in (self.active[selector], target[0] if target else
+                        pending[0][0] if pending else None):
+                key = next((k for k in self.candidates if k[0] == tag), None)
+                if key:
+                    sample = self.samples[key]
+                    compared.append({'candidate': tag, 'score': score(sample, self.candidates[key]['weight'], now,
+                        7200 if tag == self.active[selector] else self.settings['throughput_sweep_seconds']),
+                        'sample_age': now-sample.throughput_at if sample.successes else None})
+            signature = (decision.reason, target, pending)
+            if self.last_decisions.get(selector) != signature:
+                self.log('selector_decision', selector=selector, reason=decision.reason, compared=compared)
+                self.last_decisions[selector] = signature
+            if target is None or target[0] == self.active[selector]:
+                continue
+            try:
+                self.invalidate()
+                self.restart_client()
+                clash_api.select(self.config, selector, target[0], managed)
+                self.policy.observe(selector, target[0], now)
+                self.log('selector_switched', selector=selector, candidate=target[0], reason=decision.reason,
+                         compared=compared)
+                self.inspect()  # Invalidate samples whose effective paths changed.
+            except Exception as exc:
+                self.log('selector_write_failed', selector=selector, error=type(exc).__name__)
+
     def summary(self, now):
         choices = {}
-        for selector in SELECTORS:
-            allowed = [(k, c) for k, c in self.candidates.items() if c['provider'] != 'WARP' or selector != 'warp_upstream']
-            if selector == 'proxy_deepmind':
-                blanc = [(k, c) for k, c in allowed if c['provider'] == 'blanc']
-                allowed = blanc if any(self.samples[k].healthy is not False for k, _ in blanc) else [(k, c) for k, c in allowed if c['provider'] == 'WARP']
+        for selector in selectors(self.config):
+            members = selector_members(self.config, selector)
+            tiers = self.settings.get('selector_priorities', {}).get(selector)
+            allowed = [(k, c) for k, c in self.candidates.items() if k[0] in members]
+            if tiers is not None:
+                for tier in tiers:
+                    group = [(k, c) for k, c in allowed if c['provider'] in tier]
+                    if any(self.samples[k].healthy is not False for k, _ in group):
+                        allowed = group
+                        break
+                else:
+                    allowed = []
             ranked = []
             for key, c in allowed:
                 sample = self.samples[key]
@@ -238,4 +361,7 @@ class Scheduler:
                     sample = self.samples[key]
                     choices[selector].update(score=score(sample, c['weight'], now, 7200),
                         sample_age=now-sample.throughput_at if sample.successes else None)
+        for selector, signature in self.last_decisions.items():
+            if selector in self.settings.get('managed_selectors', []):
+                choices[selector]['decision_reason'] = signature[0]
         self.log('observe_summary', selectors=choices, application_bytes=self.client.accounting.summary())

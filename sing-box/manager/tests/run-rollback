@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
     volumes = ['-v', f'{config}:/config:ro', '-v', f'{data}:/data']
     try:
         docker('run', '-d', '--name', name, '--network', 'none', '--user', str(os.getuid()),
-               '--read-only', '--tmpfs', '/tmp', *volumes, 'spoofskipper-manager:stage1')
+               '--read-only', '--tmpfs', '/tmp', *volumes, 'spoofskipper-manager:stage3')
         wait(lambda: b'activation_succeeded' in docker('logs', name))
         docker('stop', '-t', '3', name)
         assert docker('inspect', '-f', '{{.State.ExitCode}}', name).strip() == b'0'
@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
         # a bind-mounted file's old length after a host-side replacement).
         docker('run', '--rm', '--network', 'none', '--user', str(os.getuid()),
                '-v', f'{config}:/config', '--entrypoint', 'python3', '-e', 'PYTHONPATH=/opt/manager',
-               'spoofskipper-manager:stage1', '-c',
+               'spoofskipper-manager:stage3', '-c',
                'from pathlib import Path; from spoofskipper_manager.state import atomic_write; '
                'atomic_write(Path("/config/config.jsonnet"), Path("/config/config.jsonnet.legacy").read_bytes())')
         local_specs = {'subscriptions': [{**specs['subscriptions'][0], 'url': (config / 'provider.txt').as_uri()}]}
@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
         # baseline container's network namespace using the preloaded new image.
         wait(lambda: docker('exec', name, '/bin/sh', '-c', '[ -s /tmp/sing.json ]') == b'')
         docker('run', '--rm', '--network', 'container:' + name, '--entrypoint', 'python3',
-               'spoofskipper-manager:stage1', '-c',
+               'spoofskipper-manager:stage3', '-c',
                'import json,time,urllib.request\n'
                'for _ in range(50):\n'
                ' try:\n'

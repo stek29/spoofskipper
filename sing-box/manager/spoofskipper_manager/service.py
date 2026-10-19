@@ -11,7 +11,7 @@ from pathlib import Path
 from . import compiler, clash_api
 from .state import atomic_write, write_json, remove
 from .subscriptions import Providers
-from .scheduler import Scheduler
+from .scheduler import Scheduler, resolve
 from .probes import DEFAULTS as PROBE_DEFAULTS
 
 
@@ -28,8 +28,24 @@ def load_settings(config_dir):
     settings = json.loads(path.read_text()) if path.exists() else {}
     if not isinstance(settings, dict):
         raise ValueError('manager settings must be an object')
-    if not isinstance(settings.get('probes_enabled', False), bool) or settings.get('managed_selectors', []):
-        raise ValueError('stage 2 requires boolean probes_enabled and no managed selectors')
+    managed = settings.setdefault('managed_selectors', [])
+    if (not isinstance(settings.get('probes_enabled', False), bool) or not isinstance(managed, list)
+            or any(not isinstance(s, str) or not s for s in managed)
+            or len(set(managed)) != len(managed)):
+        raise ValueError('invalid probes_enabled or managed_selectors')
+    if managed and not settings.get('probes_enabled', False):
+        raise ValueError('managed selectors require probes_enabled')
+    priorities = settings.get('selector_priorities', {})
+    if not isinstance(priorities, dict):
+        raise ValueError('selector_priorities must be an object')
+    for selector, tiers in priorities.items():
+        if (not isinstance(selector, str) or not selector or not isinstance(tiers, list) or not tiers
+                or any(not isinstance(tier, list) or not tier or
+                       any(not isinstance(p, str) or not p for p in tier) for tier in tiers)):
+            raise ValueError('invalid selector priority tiers')
+        providers = [p for tier in tiers for p in tier]
+        if len(set(providers)) != len(providers):
+            raise ValueError('duplicate provider in selector priorities')
     weights = settings.get('provider_weights', {})
     if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
             or not math.isfinite(w) or w <= 0 for w in weights.values()):
@@ -171,19 +187,32 @@ class Manager:
         if self.current == config and self.alive():
             log('activation_unchanged', revision=compiler.revision(config))
             return
-        self.scheduler.invalidate()
+        choices, selections = {}, {}
+        managed = self.settings.get('managed_selectors', [])
+        if self.current is not None and managed:
+            # Inspection must succeed before an ownership-changing activation.
+            live = clash_api.proxies(self.current)
+            choices = {tag: resolve(live, tag) for tag in managed if tag in live}
+            selections = {tag: live[tag].get('now') for tag in choices}
         old = self.current
         if old is not None:
             atomic_write(self.previous, self.live.read_bytes())
             atomic_write(self.marker, 'activating\n')
         write_json(self.live, config)
+        self.scheduler.invalidate()
         try:
             if self.alive():
                 self.child.send_signal(signal.SIGHUP)
             else:
                 self.start()
             verified = self.verify(config)
-        except OSError:
+            if verified:
+                entries = {o['tag']: o for o in config.get('outbounds', [])}
+                for tag, leaf in choices.items():
+                    if leaf in entries.get(tag, {}).get('outbounds', []):
+                        clash_api.select(config, tag, leaf, managed)
+                        log('selector_handoff', selector=tag, candidate=leaf)
+        except (OSError, ValueError):
             verified = False
         if verified:
             self.current = config
@@ -207,8 +236,22 @@ class Manager:
         if not recovered:
             log('rollback_failed')
             raise RecoveryFailed('bounded rollback failed')
+        # Recover previous owned choices too, without writing any selector that
+        # has been removed from managed_selectors.
+        entries = {o['tag']: o for o in old.get('outbounds', [])}
+        for tag, selection in selections.items():
+            if selection in entries.get(tag, {}).get('outbounds', []):
+                try:
+                    clash_api.select(old, tag, selection, managed)
+                except Exception:
+                    log('selector_rollback_failed', selector=tag)
+                    raise RecoveryFailed('selector recovery failed') from None
         self.current = old
         remove(self.marker)
+        if self.scheduler.config is not None:
+            safe = {**self.scheduler.settings, 'managed_selectors': [tag for tag in
+                self.scheduler.settings.get('managed_selectors', []) if tag in managed]}
+            self.scheduler.configure(old, list(self.scheduler.candidates.values()), safe)
         log('rollback_succeeded', revision=compiler.revision(old))
         raise ValueError('new configuration rolled back')
 
@@ -266,6 +309,7 @@ class Manager:
                     self.reload_requested = False
                     try:
                         self.settings = load_settings(self.config_dir)
+                        self.scheduler.restrict(self.settings)
                         providers = Providers(self.config_dir, self.root, self.settings, log)
                         if pending is None:
                             pending = dict(providers.snapshots) if reload_only else providers.refresh()
@@ -278,8 +322,8 @@ class Manager:
                             backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
                             continue
                         self.activate(self.prepare(pending, providers))
-                        providers.commit(pending)
                         self.configure_probes(providers, pending)
+                        providers.commit(pending)
                         pending = None
                         backoff = self.settings['bootstrap_backoff_seconds']
                         if not reload_only:

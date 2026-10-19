@@ -74,6 +74,7 @@ def render(template, subscriptions, scratch, settings=None, candidates=()):
     finally:
         ext.unlink(missing_ok=True)
     add_probe_routes(config, settings or {}, candidates)
+    handoff_selectors(config, (settings or {}).get('managed_selectors', []), candidates)
     validate(config)
     if any(o['tag'].startswith(REVISION_PREFIX) for o in config.get('outbounds', [])):
         raise ValueError('reserved revision tag prefix')
@@ -96,10 +97,26 @@ def check(config, scratch, core='sing-box'):
 PROBE_TAG = '__spoofskipper_probe'
 
 
-def probe_outbounds(config, candidates):
-    tags = {c['outbound']['tag'] for c in candidates}
-    tags.update(o['tag'] for o in config.get('endpoints', []) if o.get('detour') == 'warp_upstream')
-    return [o for o in config.get('outbounds', []) + config.get('endpoints', []) if o['tag'] in tags]
+def selectors(config):
+    return [o['tag'] for o in config.get('outbounds', []) if o.get('type') == 'selector']
+
+
+def selector_members(config, selector):
+    entries = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
+    def leaves(tag, seen):
+        if tag in seen:
+            raise ValueError('selector dependency cycle')
+        entry = entries[tag]
+        if entry.get('type') in ('selector', 'urltest'):
+            return [leaf for member in entry['outbounds'] for leaf in leaves(member, seen | {tag})]
+        return [tag]
+    return leaves(selector, set())
+
+
+def probe_outbounds(config, candidates=()):
+    # Every rendered proxy leaf is eligible, whether subscribed or local.
+    return [o for o in config.get('outbounds', []) + config.get('endpoints', [])
+            if o.get('type') not in ('selector', 'urltest', 'direct', 'block', 'dns')]
 
 
 def add_probe_routes(config, settings, candidates):
@@ -119,3 +136,43 @@ def add_probe_routes(config, settings, candidates):
     rules.append({'inbound': [PROBE_TAG], 'action': 'reject'})
     route = config.setdefault('route', {})
     route['rules'] = rules + route.get('rules', [])
+
+
+def handoff_selectors(config, managed, candidates):
+    """Flatten owned selectors; retain native groups with any other reference."""
+    if not managed:
+        return
+    tags = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
+    selectable = {o['tag'] for o in probe_outbounds(config, candidates)}
+    removed = set()
+    def leaves(tag):
+        entry = tags[tag]
+        if entry.get('type') in ('selector', 'urltest'):
+            if entry['type'] == 'urltest':
+                removed.add(tag)
+            return [leaf for member in entry['outbounds'] for leaf in leaves(member)]
+        return [tag]
+    validate(config)  # Reject cycles before recursively expanding members.
+    for selector in managed:
+        if tags.get(selector, {}).get('type') != 'selector':
+            raise ValueError('managed selector missing or incompatible')
+        entry = tags[selector]
+        members = list(dict.fromkeys(leaf for member in entry['outbounds'] for leaf in leaves(member)))
+        if not members or any(tag not in selectable for tag in members):
+            raise ValueError('managed selector has incompatible candidate members')
+        entry['outbounds'] = members
+        entry.pop('default', None)
+    # Scan all references, including routing/DNS/detours. Never remove a group
+    # still used by an unmanaged selector or another part of the native config.
+    def references(obj):
+        if isinstance(obj, dict):
+            return set().union(*(references(v) for k, v in obj.items() if k != 'tag')) if obj else set()
+        if isinstance(obj, list):
+            return set().union(*(references(v) for v in obj)) if obj else set()
+        return {obj} if isinstance(obj, str) else set()
+    while removed:
+        unused = removed - references(config)
+        if not unused:
+            break
+        config['outbounds'] = [o for o in config['outbounds'] if o['tag'] not in unused]
+        removed -= unused
