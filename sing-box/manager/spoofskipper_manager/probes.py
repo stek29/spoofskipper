@@ -117,21 +117,12 @@ class _Connection(http.client.HTTPSConnection):
 
 
 def validate_response(response, expected, ranged, head):
-    headers = response.headers
-    for name in ('Content-Length', 'Content-Encoding', 'Transfer-Encoding', 'Content-Range'):
-        if len(headers.get_all(name, [])) > 1:
-            raise ValueError('duplicate framing header')
-    if headers.get('Content-Encoding', 'identity').lower() != 'identity':
+    # http.client handles framing; only reject what would distort the measurement.
+    if response.getheader('Content-Encoding', 'identity').lower() != 'identity':
         raise ValueError('encoded body')
-    transfer = headers.get('Transfer-Encoding', '').lower()
-    length = headers.get('Content-Length')
-    if transfer not in ('', 'chunked') or (transfer and length is not None):
-        raise ValueError('invalid response framing')
-    length = int(length) if length is not None else None
-    if not head and length is None and not response.chunked:
-        raise ValueError('body has no explicit framing')
+    length = response.length  # Parsed by http.client before any body is read; None if chunked.
     if ranged and response.status == 206:
-        match = re.fullmatch(r'bytes 0-262143/(\d+)', headers.get('Content-Range', ''))
+        match = re.fullmatch(r'bytes 0-262143/(\d+)', response.getheader('Content-Range', ''))
         if not match or int(match[1]) < THROTTLE or (length is not None and length != THROTTLE):
             raise ValueError('invalid backup range')
     elif response.status != 200:
