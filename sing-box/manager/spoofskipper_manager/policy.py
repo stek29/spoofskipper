@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import statistics
 import math
 
-from .probes import Probe
+from .probes import Probe, RATE_CAP_MBPS
 from .samples import Health
 from .settings import HOLD, MARGIN, ACTIVE_SCORE_MAX_AGE, FRESH_SAMPLE_SECONDS, SCORE_MAX_AGE
 
@@ -14,7 +14,7 @@ def score(sample, weight, now, max_age):
         return None
     rate = statistics.median(rate for rate, _ in recent[-3:])
     latency = statistics.median(latency for _, latency in recent[-3:])
-    return weight * (min(rate, 50)/10)**.6 * (200/max(latency, 20))**.4
+    return weight * (min(rate, RATE_CAP_MBPS)/10)**.6 * (200/max(latency, 20))**.4
 
 
 @dataclass

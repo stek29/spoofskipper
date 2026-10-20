@@ -77,7 +77,7 @@ Every probe is one HTTPS request through the path, differing only in size:
 |---|---|---|
 | `gate` | 1 byte | Reachability and latency |
 | `throttle` | 256 KiB | The connection keeps working past the throttling threshold |
-| `throughput` | up to 8 MiB | Rate after the first 512 KiB; also passes the threshold |
+| `throughput` | up to 16 MiB | Rate after the first 1 MiB; also passes the threshold |
 
 A path is healthy only after a `throttle` or `throughput` probe reads past 256 KiB.
 Gates keep proven health fresh but cannot make an unknown or failed path healthy,
@@ -94,7 +94,7 @@ All-path failure keeps the current route and never adds direct routing.
 
 The five-minute elective hold and 15% improvement margin are fixed policy rules,
 not configurable cadences. Scores use the last three successful throughput/latency
-samples, capped at 50 Mbps and weighted by provider. Active scores expire after
+samples, capped at 100 Mbps and weighted by provider. Active scores expire after
 two hours, standby scores after two days. Every elective switch, including a
 return to a higher tier (which skips the margin), requires a `throughput` result
 taken after the hold and no older than 30 seconds. A failed or stale challenge is
@@ -103,16 +103,16 @@ retried immediately; upstream-change and worker-error discards retain their
 normal scheduling timestamps.
 
 Throughput runs only on active paths and on the three lowest-latency healthy
-standbys of each provider. It skips 512 KiB, then reads for at most four seconds
-after the response headers, stopping early at 4 MiB scored or sufficient
-evidence above 50 Mbps. Native URLTest checks remain independently active.
+standbys of each provider. It skips 1 MiB (TCP slow start), then reads for at
+most four seconds after the response headers, stopping early at 8 MiB scored or
+once 4 MiB show a rate above 100 Mbps. Native URLTest checks remain independently active.
 
 Approximate probe traffic with default cadences, for fast paths:
 
 | Source | Volume |
 |---|---|
-| Each active path | about 180 MiB/day (throttle every 5 min, throughput hourly) |
-| Each provider's 3 shortlisted standbys | up to about 54 MiB/day together |
+| Each active path | up to about 290 MiB/day (throttle every 5 min, throughput hourly, at most 9 MiB each) |
+| Each provider's 3 shortlisted standbys | up to about 108 MiB/day together |
 | Gates | a TLS handshake each: every minute (active) or 8 minutes (standby) |
 | Failed paths that still answer gates | one `throttle` attempt per gate; throttled paths usually stall within tens of KiB |
 

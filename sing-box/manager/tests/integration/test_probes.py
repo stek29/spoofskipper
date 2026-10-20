@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from test_lifecycle import free_port, wait_for, FIXTURES
 from spoofskipper_manager import compiler, clash_api
-from spoofskipper_manager.probes import ProbeClient, THROTTLE, SKIP, TOTAL
+from spoofskipper_manager.probes import ProbeClient, THROTTLE, SKIP, TOTAL, SCORED_MAX
 
 
 @unittest.skipUnless(shutil.which('sing-box'), 'requires offline Compose pinned core')
@@ -230,7 +230,7 @@ class ProbeIntegrationTests(unittest.TestCase):
         self.assertTrue(result.early_stop)
         self.assertEqual(result.skipped, SKIP)
         self.assertGreater(result.mbps, 0)
-        self.assertLessEqual(result.bytes, SKIP+4*1024*1024)
+        self.assertLessEqual(result.bytes, SKIP+SCORED_MAX)
         # Served bytes can include kernel/TLS buffers after the intentional close.
         time.sleep(.05)
         self.assertLessEqual(self.served-before, TOTAL)

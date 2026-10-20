@@ -39,9 +39,9 @@ class PolicyTests(unittest.TestCase):
         s.successes = [(100, 1, 1000), (900, 10, 50), (950, 100, 50), (999, 20, 50)]
         expected = 1.25 * 2**.6 * 4**.4
         self.assertAlmostEqual(score(s, 1.25, 1000, 200), expected)
-        s.successes = [(1000, 100, 50)]
+        s.successes = [(1000, 200, 50)]
         capped = score(s, 1, 1000, 7200)
-        s.successes = [(1000, 50, 50)]
+        s.successes = [(1000, 100, 50)]
         self.assertEqual(score(s, 1, 1000, 7200), capped)
         self.assertIsNone(score(s, 1, 8201, 7200))
         self.assertIsNotNone(score(s, 1, 8201, SCORE_MAX_AGE))

@@ -15,14 +15,17 @@ from .settings import Settings
 
 # Throttling middleboxes let small responses through and stall the connection
 # after a few dozen KiB, so health is proven only past THROTTLE bytes.
-THROTTLE, SKIP, TOTAL = 256 * 1024, 512 * 1024, 8 * 1024 * 1024
+THROTTLE, SKIP, TOTAL = 256 * 1024, 1024 * 1024, 16 * 1024 * 1024
+# Throughput is scored up to RATE_CAP_MBPS: a sample stops at SCORED_MAX bytes
+# after SKIP (slow start), or once EVIDENCE bytes show a rate above the cap.
+RATE_CAP_MBPS, SCORED_MAX, EVIDENCE = 100, 8 * 1024 * 1024, 4 * 1024 * 1024
 
 
 class Probe(str, Enum):
     """One request per probe; the kinds differ only in their byte budget."""
     GATE = 'gate'              # 1 byte: reachability and latency
     THROTTLE = 'throttle'      # 256 KiB: the connection survives the threshold
-    THROUGHPUT = 'throughput'  # up to 8 MiB: rate after the first 512 KiB
+    THROUGHPUT = 'throughput'  # up to 16 MiB: rate after the first 1 MiB
 
     @property
     def budget(self):
@@ -188,7 +191,7 @@ class ProbeClient:
                         post_started = self.clock()
                     scored = body - SKIP
                     elapsed = self.clock() - post_started if post_started is not None else 0
-                    if scored >= 4*1024*1024 or (scored >= THROTTLE and elapsed > 0 and scored*8/elapsed/1e6 > 50):
+                    if scored >= SCORED_MAX or (scored >= EVIDENCE and elapsed > 0 and scored*8/elapsed/1e6 > RATE_CAP_MBPS):
                         result.early_stop = True
                         break
             if not result.early_stop and response.read1(1):
