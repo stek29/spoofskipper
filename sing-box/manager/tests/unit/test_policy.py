@@ -183,26 +183,18 @@ class OwnershipTests(unittest.TestCase):
              'experimental': {'clash_api': {'external_controller': '127.0.0.1:9090'}}}
         return c, [{'outbound': o} for o in leaves]
 
-    def test_partial_handoff_shared_groups_last_reference_and_reversal(self):
+    def test_handoff_flattens_only_owned_selectors(self):
         native, candidates = self.config()
         c = copy.deepcopy(native)
         compiler.handoff_selectors(c, ['proxy_main'], candidates)
         entries = {o['tag']: o for o in c['outbounds']}
         self.assertEqual(entries['proxy_main']['outbounds'], ['a', 'b'])
         self.assertEqual(entries['proxy_deepmind']['outbounds'], ['p_best', 'a', 'b'])
-        self.assertIn('p_best', entries)
-        c = copy.deepcopy(native)
-        compiler.handoff_selectors(c, ['proxy_main', 'proxy_deepmind', 'chained_upstream'], candidates)
-        self.assertNotIn('p_best', {o['tag'] for o in c['outbounds']})
         c = copy.deepcopy(native)
         compiler.handoff_selectors(c, [], candidates)
         self.assertEqual(c, native)
 
-    def test_route_reference_retained_incompatible_members_and_cycles_rejected(self):
-        c, candidates = self.config()
-        c['route'] = {'final': 'p_best'}
-        compiler.handoff_selectors(c, ['proxy_main', 'proxy_deepmind', 'chained_upstream'], candidates)
-        self.assertIn('p_best', {o['tag'] for o in c['outbounds']})
+    def test_handoff_rejects_incompatible_members_and_cycles(self):
         c, candidates = self.config()
         c['outbounds'].append({'type': 'direct', 'tag': 'bypass'})
         c['outbounds'][2]['outbounds'].append('bypass')

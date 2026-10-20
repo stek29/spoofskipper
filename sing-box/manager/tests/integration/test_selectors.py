@@ -43,17 +43,19 @@ class OwnershipReload:
         self.assertEqual(p['restricted']['now'], 'example')
         self.assertIn('example', p)
         self.assertIn('extra', p['restricted']['all'])
-        # Last native reference disappears only when every selector is handed off.
+        # Every selector handed off: all are flattened; native groups stay defined.
         self.settings['managed_selectors'] = list(SELECTORS)
         write_json(self.config/'local-manager.json', self.settings)
         self.proc.send_signal(signal.SIGHUP)
-        wait_for(lambda: 'example' not in {o['tag'] for o in self.live()['outbounds']})
+        flattened = lambda tag: set(clash_api.proxies(self.live())[tag]['all']) == {'example_one', 'extra_one'}
+        wait_for(lambda: flattened('restricted'))
+        self.assertIn('example', {o['tag'] for o in self.live()['outbounds']})
         wait_for(lambda: clash_api.proxies(self.live())['traffic']['now'] == 'extra_one')
-        # Removal restores native references/groups; dashboard control is writable.
+        # Removal restores the native members; dashboard control is writable.
         self.settings['managed_selectors'] = ['traffic', 'transport']
         write_json(self.config/'local-manager.json', self.settings)
         self.proc.send_signal(signal.SIGHUP)
-        wait_for(lambda: 'example' in {o['tag'] for o in self.live()['outbounds']})
+        wait_for(lambda: 'example' in clash_api.proxies(self.live())['restricted']['all'])
         c = self.live()
         clash_api.select(c, 'restricted', 'extra', ['restricted'])
         time.sleep(.3)

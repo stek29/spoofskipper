@@ -110,36 +110,18 @@ def add_probe_routes(config, settings, candidates):
 
 
 def handoff_selectors(config, managed, candidates):
-    """Flatten owned selectors; retain native groups with any other reference."""
+    """Flatten owned selectors to their proxy leaves; native groups stay as they are."""
     if not managed:
         return
     graph = OutboundGraph(config)
     tags = graph.entries
     selectable = {outbound['tag'] for outbound in probe_outbounds(config, candidates)}
-    removed = set()
     validate(config)  # Reject cycles before recursively expanding members.
     for selector in managed:
         if tags.get(selector, {}).get('type') != 'selector':
             raise ValueError('managed selector missing or incompatible')
-        entry = tags[selector]
-        groups = set()
-        members = list(dict.fromkeys(graph.leaves(selector, groups)))
-        removed.update(tag for tag in groups if tags[tag]['type'] == 'urltest')
+        members = list(dict.fromkeys(graph.leaves(selector)))
         if not members or any(tag not in selectable for tag in members):
             raise ValueError('managed selector has incompatible candidate members')
-        entry['outbounds'] = members
-        entry.pop('default', None)
-    # Scan all references, including routing/DNS/detours. Never remove a group
-    # still used by an unmanaged selector or another part of the native config.
-    def references(obj):
-        if isinstance(obj, dict):
-            return set().union(*(references(v) for k, v in obj.items() if k != 'tag')) if obj else set()
-        if isinstance(obj, list):
-            return set().union(*(references(v) for v in obj)) if obj else set()
-        return {obj} if isinstance(obj, str) else set()
-    while removed:
-        unused = removed - references(config)
-        if not unused:
-            break
-        config['outbounds'] = [o for o in config['outbounds'] if o['tag'] not in unused]
-        removed -= unused
+        tags[selector]['outbounds'] = members
+        tags[selector].pop('default', None)

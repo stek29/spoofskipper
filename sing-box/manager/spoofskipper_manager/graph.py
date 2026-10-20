@@ -49,11 +49,9 @@ class OutboundGraph:
                 raise ValueError('selector default is not a member')
             self.fold(tag, lambda entry, children: None)
 
-    def leaves(self, tag, groups=None):
+    def leaves(self, tag):
         def flatten(entry, children):
             if entry.get('type') in GROUP_TYPES:
-                if groups is not None:
-                    groups.add(entry['tag'])
                 return [leaf for branch in children for leaf in branch]
             return [entry['tag']]
         return self.fold(tag, flatten, groups_only=True)

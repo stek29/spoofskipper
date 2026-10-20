@@ -128,7 +128,7 @@ Slow paths read less, because throughput is time-boxed.
    `probe_sample` logs. Add selectors one at a time.
 
 A managed selector is flattened to proxy leaves while preserving its resolved
-choice through a verified write. Shared native groups remain while referenced.
+choice through a verified write. Native groups are left in place.
 Dashboard changes to managed selectors may be overwritten by policy.
 
 To return one selector to native control, remove it from `managed_selectors` and
