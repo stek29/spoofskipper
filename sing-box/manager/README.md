@@ -52,7 +52,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_timeout` | 15 | Overall probe deadline, maximum 15 |
 | `probe_stall_timeout` | 2 | Body stall deadline |
 | `throughput_seconds` | 4 | Throughput body time box after headers, maximum 4 |
-| `probe_urls` | Cloudflare `__down`, then OVH and Hetzner 100 MiB files | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
+| `probe_urls` | Cloudflare `__down`, then the OVH 100 MiB file | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
 | `uplink_urls` | `https://ya.ru/`, `https://yastatic.net/` | HTTPS URLs reached directly, never through a proxy; empty disables the uplink check |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
