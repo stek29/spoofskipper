@@ -1,0 +1,8 @@
+{
+  "provider_weights": {"example": 1.25},
+  "probes_enabled": false,
+  "managed_selectors": [],
+  "refresh_seconds": 7200,
+  "revision_timeout": 5,
+  "shutdown_timeout": 2
+}

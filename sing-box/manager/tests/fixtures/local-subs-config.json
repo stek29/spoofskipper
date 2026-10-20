@@ -1,0 +1,3 @@
+{
+  "subscriptions": [{"prefix": "example", "url": "http://subscriptions:8000/ok", "tag_template": "{prefix}_{name}", "group_template": "{prefix}"}]
+}

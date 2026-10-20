@@ -8,7 +8,9 @@ RUN set -eu \
     ; apk add --no-cache \
     jsonnet \
     bash \
+    python3 \
     ;
 
+COPY ./manager/spoofskipper_manager /opt/manager/spoofskipper_manager
 COPY ./entrypoint ./reload /
 ENTRYPOINT [ "/entrypoint" ]

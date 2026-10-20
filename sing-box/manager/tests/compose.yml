@@ -1,0 +1,19 @@
+services:
+  tests:
+    image: spoofskipper-manager:test
+    user: '65534:65534'
+    entrypoint: ['python3', '-m', 'unittest', 'discover', '-s', '/opt/manager/tests/integration', '-v']
+    environment:
+      PYTHONPATH: /opt/manager
+      PYTHONDONTWRITEBYTECODE: '1'
+    volumes:
+      - ../spoofskipper_manager:/opt/manager/spoofskipper_manager:ro
+      - ./:/opt/manager/tests:ro
+    networks: [fixtures]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+networks:
+  fixtures:
+    internal: true

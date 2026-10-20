@@ -44,7 +44,8 @@ services:
     volumes:
       - ./config/sing:/config:ro
       - ./data:/data:rw
-    command: ['run', '-c', '/tmp/sing.json']
+    command: ['serve']
+    stop_grace_period: 15s
     restart: always
     privileged: true
     cap_add:

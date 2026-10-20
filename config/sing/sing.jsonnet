@@ -120,7 +120,7 @@ local default_config = {
     rdrc_timeout: '1h',
   },
 
-  // clash api disabled by default
+  // no external clash api by default; the manager adds a loopback one
   clash_api: {},
 };
 
