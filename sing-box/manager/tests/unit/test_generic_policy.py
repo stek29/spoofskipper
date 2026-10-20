@@ -51,11 +51,11 @@ class GenericPolicyTests(unittest.TestCase):
             self.assertEqual(scheduler.candidates[sample_key(config['outbounds'][4])]['weight'], 2.5)
             compiler.handoff_selectors(copy.deepcopy(config), ['arbitrary'], [])
             with patch.object(clash_api, 'proxies', return_value=api):
-                scheduler.inspect()
+                scheduler.controller.inspect()
                 for sample in scheduler.samples.values():
                     sample.health = Health.HEALTHY
                 api['hop']['now'] = 'two'
-                scheduler.inspect()
+                scheduler.controller.inspect()
             for tag in ('chained-a', 'chained-b'):
                 self.assertIsNone(scheduler.samples[sample_key(next(o for o in config['outbounds'] if o['tag'] == tag))].healthy)
             self.assertTrue(scheduler.samples[sample_key(config['outbounds'][0])].healthy)

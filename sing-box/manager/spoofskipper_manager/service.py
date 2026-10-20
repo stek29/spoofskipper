@@ -10,7 +10,8 @@ from pathlib import Path
 from . import compiler, clash_api
 from .state import atomic_write, write_json, remove
 from .subscriptions import Providers
-from .scheduler import Scheduler, resolve
+from .scheduler import Scheduler
+from .clash_api import resolve
 from .settings import Settings, load_settings
 
 

@@ -7,7 +7,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
 from spoofskipper_manager.probes import Accounting, sample_key
-from spoofskipper_manager.scheduler import Health, Scheduler, Sample, score
+from spoofskipper_manager.scheduler import Health, Scheduler, Sample
+from spoofskipper_manager.policy import score
 
 
 class SchedulingTests(unittest.TestCase):
@@ -169,7 +170,7 @@ class SchedulingTests(unittest.TestCase):
         for key, sample in self.scheduler.samples.items():
             sample.health, sample.latency = Health.HEALTHY, 20
             sample.successes = [(self.now, 50 if key[0] == 'chained' else 1, 20)]
-        self.scheduler.summary(self.now)
+        self.scheduler.controller.summary(self.now)
         choices = self.logs[-1][1]['selectors']
         self.assertEqual(choices['proxy_main']['proposed'], 'chained')
         self.assertNotEqual(choices['chained_upstream']['proposed'], 'chained')

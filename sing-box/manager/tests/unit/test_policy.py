@@ -341,13 +341,13 @@ class PolicySchedulingTests(unittest.TestCase):
     def test_upstream_write_drains_and_invalidates_chained_samples(self):
         from concurrent.futures import Future
         self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['chained_upstream'])
-        self.scheduler.inspect()
+        self.scheduler.controller.inspect()
         chained = self.key('chained')
         future = Future()
         self.scheduler.jobs[future] = (chained, 'throughput', self.scheduler.epoch)
         self.scheduler.samples[self.key('a')].health = Health.FAILED_GATE
         old_client = self.scheduler.client
-        self.scheduler.apply_policy(self.now)
+        self.scheduler.controller.apply_policy(self.now)
         self.assertTrue(future.cancelled())
         self.assertTrue(old_client.cancelled.is_set())
         self.assertEqual(self.api['chained_upstream']['now'], 'b')

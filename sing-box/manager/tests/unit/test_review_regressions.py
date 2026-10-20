@@ -70,7 +70,7 @@ class RefreshFailureTests(unittest.TestCase):
                         scheduler.active = {'proxy_main': 'a'}
                         for key in scheduler.samples:
                             scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] == 'b' else Health.FAILED_GATE, healthy_at=100, latency=20)
-                        scheduler.apply_policy(100)
+                        scheduler.controller.apply_policy(100)
                     select.assert_not_called()
             def checked_tick():
                 try:
@@ -155,12 +155,12 @@ class EvidenceTests(unittest.TestCase):
         scheduler = Scheduler(lambda *args, **kw: None)
         try:
             scheduler.settings = scheduler.settings.with_changes(managed_selectors=['proxy_main'])
-            scheduler.policy.observe('proxy_main', 'a', 100)
-            scheduler.policy.pending['proxy_main'] = (('b', 'hash'), 400)
+            scheduler.controller.policy.observe('proxy_main', 'a', 100)
+            scheduler.controller.policy.pending['proxy_main'] = (('b', 'hash'), 400)
             scheduler.restrict({'probes_enabled': True, 'managed_selectors': ['proxy_deepmind']})
             self.assertEqual(scheduler.settings['managed_selectors'], ())
-            self.assertNotIn('proxy_main', scheduler.policy.choices)
-            self.assertNotIn('proxy_main', scheduler.policy.pending)
+            self.assertNotIn('proxy_main', scheduler.controller.policy.choices)
+            self.assertNotIn('proxy_main', scheduler.controller.policy.pending)
         finally:
             scheduler.close()
 
@@ -181,7 +181,7 @@ class DependencyIdentityTests(unittest.TestCase):
         self.key = sample_key(self.config['endpoints'][0])
         self.configure(self.config)
         with patch.object(clash_api, 'proxies', return_value=self.api):
-            self.scheduler.inspect()
+            self.scheduler.controller.inspect()
 
     def configure(self, config):
         self.scheduler.configure(config, [{'provider': 'p', 'weight': 1, 'outbound': o}
@@ -201,7 +201,7 @@ class DependencyIdentityTests(unittest.TestCase):
         changed['outbounds'][1]['password'] = 'rotated'
         self.configure(changed)
         with patch.object(clash_api, 'proxies', return_value=self.api):
-            self.scheduler.inspect()
+            self.scheduler.controller.inspect()
         self.assertIs(self.scheduler.samples[self.key], sample)
 
     def test_selected_credentials_server_tls_and_detour_changes_drop_samples(self):
@@ -210,7 +210,7 @@ class DependencyIdentityTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.configure(self.config)
                 with patch.object(clash_api, 'proxies', return_value=self.api):
-                    self.scheduler.inspect()
+                    self.scheduler.controller.inspect()
                 self.seed()
                 changed = copy.deepcopy(self.config)
                 changed['outbounds'][index][field] = value

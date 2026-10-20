@@ -5,11 +5,11 @@ from enum import Enum
 import time
 import weakref
 from . import clash_api
-from .probes import Accounting, DEFAULTS, THROTTLE, ProbeClient, sample_key
-from .policy import Policy, score
-from .settings import (Settings, ACTIVE_SCORE_MAX_AGE, INSPECT_SECONDS, SUMMARY_SECONDS,
+from .probes import Accounting, THROTTLE, ProbeClient, sample_key
+from .controller import SelectorController
+from .settings import (Settings, INSPECT_SECONDS, SUMMARY_SECONDS,
                        GATE_FAILURE_THRESHOLD)
-from .compiler import probe_outbounds, selectors, selector_members
+from .compiler import probe_outbounds
 
 
 class Health(Enum):
@@ -97,16 +97,6 @@ class Sample:
         return self.successes[-1][0] if self.successes else float('-inf')
 
 
-def resolve(proxies, tag):
-    seen = set()
-    while tag in proxies and proxies[tag].get('now'):
-        if tag in seen:
-            raise ValueError('API selector cycle')
-        seen.add(tag)
-        tag = proxies[tag]['now']
-    return tag
-
-
 def path_identity(config, proxies, tag):
     """Rendered candidate identity including selected groups and recursive detours."""
     entries = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
@@ -138,9 +128,8 @@ class Scheduler:
         self.accounting = Accounting()
         self.client = None
         self.clients = weakref.WeakSet()
-        self.policy = Policy()
+        self.controller = SelectorController(self, log)
         self.requested = {}
-        self.last_decisions = {}
 
     def configure(self, config, candidates, settings):
         self.epoch += 1
@@ -168,11 +157,7 @@ class Scheduler:
         old = self.settings.get('managed_selectors', [])
         allowed = [tag for tag in old if tag in settings.get('managed_selectors', [])]
         self.settings = self.settings.with_changes(managed_selectors=allowed)
-        for tag in set(old) - set(allowed):
-            self.policy.choices.pop(tag, None)
-            self.policy.switched_at.pop(tag, None)
-            self.policy.pending.pop(tag, None)
-            self.last_decisions.pop(tag, None)
+        self.controller.revoke(set(old) - set(allowed))
         if not settings.get('probes_enabled', False):
             if self.client is not None or self.jobs:
                 self.invalidate()
@@ -226,13 +211,6 @@ class Scheduler:
             if sample.scored(now, self.settings['throughput_sweep_seconds']):
                 groups.setdefault(candidate['provider'], []).append(key)
         return {p: sorted(keys, key=lambda k: self.samples[k].latency_or_inf)[:3] for p, keys in groups.items()}
-
-    def inspect(self):
-        proxies = clash_api.proxies(self.config)
-        self.active = {tag: resolve(proxies, tag) for tag in selectors(self.config) if tag in proxies}
-        self.update_paths(proxies)
-        self.proxy_choices = proxies
-        return proxies
 
     def perform(self, client, config, candidate, kind):
         outbound = candidate['outbound']
@@ -301,13 +279,13 @@ class Scheduler:
             return
         if now-self.last_inspect >= INSPECT_SECONDS:
             try:
-                self.inspect()
+                self.controller.inspect()
             except Exception as exc:
                 self.log('probe_inspection_failed', error=type(exc).__name__)
             self.last_inspect = now
-        self.apply_policy(now)
+        self.controller.apply_policy(now)
         if now-self.last_summary >= SUMMARY_SECONDS:
-            self.summary(now)
+            self.controller.summary(now)
             self.last_summary = now
         busy = {key for key, _, _ in self.jobs.values()}
         gates = sum(kind == 'gate' for _, kind, _ in self.jobs.values())
@@ -333,81 +311,3 @@ class Scheduler:
             future = self.pool.submit(self.perform, self.client, self.config, candidate, kind)
             self.jobs[future] = (key, kind, self.epoch)
 
-    def apply_policy(self, now):
-        self.requested = {}
-        managed = self.settings.get('managed_selectors', [])
-        for selector in selectors(self.config):
-            if selector not in managed or selector not in self.active:
-                continue
-            members = selector_members(self.config, selector)
-            decision = self.policy.decide(selector, self.active[selector], self.candidates,
-                self.samples, now, self.settings, members)
-            pending = self.policy.pending.get(selector)
-            for key, kind in decision.tests:
-                last = self.samples[key].last.get(kind, float('-inf'))
-                # Retry failed/unknown challenges at the early-test cadence,
-                # rather than hammering an unscored or unreachable candidate.
-                since = pending[1] if pending and pending[0] == key else now
-                interval = self.settings['gate_active_seconds'] if kind == 'gate' else self.settings['early_test_seconds']
-                if (kind != 'gate' and last < since) or now-last >= interval:
-                    self.requested.setdefault(key, kind)
-            target = decision.target
-            compared = []
-            for tag in (self.active[selector], target[0] if target else
-                        pending[0][0] if pending else None):
-                key = next((k for k in self.candidates if k[0] == tag), None)
-                if key:
-                    sample = self.samples[key]
-                    compared.append({'candidate': tag, 'score': score(sample, self.candidates[key]['weight'], now,
-                        ACTIVE_SCORE_MAX_AGE if tag == self.active[selector] else self.settings['throughput_sweep_seconds']),
-                        'sample_age': now-sample.throughput_at if sample.successes else None})
-            signature = (decision.reason, target, pending)
-            if self.last_decisions.get(selector) != signature:
-                self.log('selector_decision', selector=selector, reason=decision.reason, compared=compared)
-                self.last_decisions[selector] = signature
-            if target is None or target[0] == self.active[selector]:
-                continue
-            try:
-                self.invalidate()
-                self.restart_client()
-                clash_api.select(self.config, selector, target[0], managed)
-                self.policy.observe(selector, target[0], now)
-                self.log('selector_switched', selector=selector, candidate=target[0], reason=decision.reason,
-                         compared=compared)
-                self.inspect()  # Invalidate samples whose effective paths changed.
-            except Exception as exc:
-                self.log('selector_write_failed', selector=selector, error=type(exc).__name__)
-
-    def summary(self, now):
-        choices = {}
-        for selector in selectors(self.config):
-            members = selector_members(self.config, selector)
-            tiers = self.settings.get('selector_priorities', {}).get(selector)
-            allowed = [(k, c) for k, c in self.candidates.items() if k[0] in members]
-            if tiers is not None:
-                for tier in tiers:
-                    group = [(k, c) for k, c in allowed if c['provider'] in tier]
-                    if any(self.samples[k].healthy is not False for k, _ in group):
-                        allowed = group
-                        break
-                else:
-                    allowed = []
-            ranked = []
-            for key, c in allowed:
-                sample = self.samples[key]
-                if sample.healthy and not sample.body_failed:
-                    value = score(sample, c['weight'], now, ACTIVE_SCORE_MAX_AGE if key[0] in self.active.values() else self.settings['throughput_sweep_seconds'])
-                    ranked.append((value is not None, value or 0, -(sample.latency_or_inf), key[0]))
-            best = max(ranked) if ranked else None
-            choices[selector] = {'active': self.active.get(selector), 'proposed': best[3] if best else None,
-                                 'proposed_score': best[1] if best and best[0] else None,
-                                 'reason': 'observed_ranking' if best else 'health_or_performance_unknown'}
-            for key, c in self.candidates.items():
-                if key[0] == self.active.get(selector):
-                    sample = self.samples[key]
-                    choices[selector].update(score=score(sample, c['weight'], now, ACTIVE_SCORE_MAX_AGE),
-                        sample_age=now-sample.throughput_at if sample.successes else None)
-        for selector, signature in self.last_decisions.items():
-            if selector in self.settings.get('managed_selectors', []):
-                choices[selector]['decision_reason'] = signature[0]
-        self.log('observe_summary', selectors=choices, application_bytes=self.client.accounting.summary())

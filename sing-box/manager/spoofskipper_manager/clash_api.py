@@ -69,3 +69,15 @@ def select(config, selector, target, managed, timeout=1):
             if proxies(config, timeout).get(selector, {}).get('now') != before:
                 raise ValueError('selector rollback verification failed') from None
         raise
+
+
+def resolve(proxies, tag):
+    seen = set()
+    while tag in proxies and proxies[tag].get('now'):
+        if tag in seen:
+            raise ValueError('API selector cycle')
+        seen.add(tag)
+        tag = proxies[tag]['now']
+    return tag
+
+

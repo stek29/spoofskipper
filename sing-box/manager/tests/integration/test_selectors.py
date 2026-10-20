@@ -155,13 +155,13 @@ class SelectorIntegrationTests(unittest.TestCase):
                     # real selection without ever submitting a download.
                     scheduler = manager.scheduler
                     scheduler.configure(c, candidates, {'probes_enabled': True, 'managed_selectors': ['traffic']})
-                    scheduler.inspect()
+                    scheduler.controller.inspect()
                     now = scheduler.clock()
                     for key in scheduler.samples:
                         scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] != 'b' else Health.FAILED_GATE, healthy_at=now,
                             latency=20, successes=[(now, 20, 20)])
                     with patch.object(scheduler.pool, 'submit') as submit:
-                        scheduler.apply_policy(now)
+                        scheduler.controller.apply_policy(now)
                         submit.assert_not_called()
                     self.assertEqual(real(c)['traffic']['now'], leaves[0]['tag'])
                     self.assertEqual(real(c)['transport'], before['transport'])
