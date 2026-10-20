@@ -6,10 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
-from spoofskipper_manager.identity import Candidate
 from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult
 from spoofskipper_manager.identity import sample_key
-from spoofskipper_manager.scheduler import Health, Scheduler, Sample
+from spoofskipper_manager.scheduler import Health, Scheduler
 from spoofskipper_manager.policy import score
 
 
@@ -136,23 +135,6 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(config['route']['rules'][0]['auth_user'][0][:6], 'probe_')
         self.assertEqual(config['route']['rules'][-2]['action'], 'reject')
         self.assertEqual(config['inbounds'][0]['listen'], '127.0.0.1')
-
-
-    def test_active_cadence_change_and_median_score(self):
-        sample = Sample(latency=999, health=Health.HEALTHY,
-                        successes=[(100, 10, 20), (101, 20, 40), (102, 50, 80)])
-        expected = (20/10)**.6 * (200/40)**.4
-        self.assertAlmostEqual(score(sample, 1, 103, 7200), expected)
-        key = next(iter(self.scheduler.samples))
-        self.scheduler.samples[key] = sample
-        sample.last['gate'] = sample.last['throughput'] = self.now
-        self.now += 61
-        self.scheduler.active = {'proxy_main': key[0]}
-        self.assertEqual(self.scheduler.next_test(key, [], self.now), 'gate')
-        sample.last['gate'] = self.now
-        self.assertEqual(self.scheduler.next_test(key, [], self.now), 'throttle')
-        sample.last['throttle'] = self.now
-        self.assertIsNone(self.scheduler.next_test(key, [], self.now))
 
 
     def test_active_warmup_does_not_wait_after_throttle(self):

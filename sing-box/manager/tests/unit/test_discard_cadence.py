@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api
 from spoofskipper_manager.identity import SampleKey
 from spoofskipper_manager.probes import Probe, ProbeResult
-from spoofskipper_manager.scheduler import Health, Sample, Scheduler
+from spoofskipper_manager.scheduler import Sample, Scheduler
 
 
 class DiscardCadenceTests(unittest.TestCase):

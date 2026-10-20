@@ -10,9 +10,8 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api, compiler, service
 from spoofskipper_manager.settings import Settings
-from spoofskipper_manager.probes import THROTTLE
 from spoofskipper_manager.identity import sample_key
-from spoofskipper_manager.scheduler import Health, Sample, Scheduler
+from spoofskipper_manager.scheduler import Health, Sample
 from spoofskipper_manager.state import write_json
 
 

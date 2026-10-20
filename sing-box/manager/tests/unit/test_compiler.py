@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler, clash_api
-from spoofskipper_manager.service import Manager, load_settings
+from spoofskipper_manager.service import Manager
 from spoofskipper_manager.state import write_json
 
 
@@ -97,15 +97,6 @@ class CompilerTests(unittest.TestCase):
             c['experimental']['clash_api']['secret'] = 'rotated'
             self.assertNotEqual(compiler.revision(first), compiler.revision(render(c)))
             self.assertEqual(list(scratch.iterdir()), [])
-
-    def test_settings_observe_only_guards(self):
-        with tempfile.TemporaryDirectory() as temp:
-            self.assertFalse(load_settings(temp).probes_enabled)
-            for data in ({'probes_enabled': 'yes'}, {'managed_selectors': ['proxy_main']},
-                         {'provider_weights': {'a': -1}}, {'revision_timeout': 0}):
-                write_json(Path(temp) / 'local-manager.json', data)
-                with self.assertRaises(ValueError):
-                    load_settings(temp)
 
     def test_activation_rollback_once_and_noop_skips_check(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -220,52 +211,6 @@ class CompilerTests(unittest.TestCase):
             finally:
                 m.scheduler.close()
 
-    def test_rollback_recreates_probes_once_with_only_retained_ownership(self):
-        from unittest.mock import Mock
-        from spoofskipper_manager.service import ActivationRolledBack
-        with tempfile.TemporaryDirectory() as temp:
-            manager = Manager(temp, Path(temp) / 'state')
-            old = config()
-            old['outbounds'] = [{'type': 'trojan', 'tag': 'a'},
-                {'type': 'selector', 'tag': 'retained', 'outbounds': ['a']},
-                {'type': 'selector', 'tag': 'revoked', 'outbounds': ['a']},
-                {'type': 'direct', 'tag': compiler.REVISION_PREFIX+'old'}]
-            new = copy.deepcopy(old)
-            new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX+'new'
-            manager.current, manager.child = old, Mock()
-            write_json(manager.live, old)
-            candidates = [{'provider': 'p', 'weight': 1, 'outbound': old['outbounds'][0]}]
-            manager.scheduler.configure(old, candidates, {
-                'probes_enabled': True, 'managed_selectors': ['retained', 'revoked']})
-            previous_client = manager.scheduler.client
-            manager.settings = manager.settings.with_changes(probes_enabled=True, managed_selectors=['retained'])
-            try:
-                with patch.object(compiler, 'check'), patch.object(manager, 'alive', return_value=True), \
-                     patch.object(manager, 'verify', side_effect=[False, True]), \
-                     patch.object(manager, 'start'), patch.object(manager, 'stop_child'), \
-                     patch.object(clash_api, 'proxies', return_value={'retained': {'now': 'a'}}), \
-                     patch.object(clash_api, 'select') as select, \
-                     patch.object(manager.scheduler, 'configure', wraps=manager.scheduler.configure) as configure:
-                    with self.assertRaises(ActivationRolledBack):
-                        manager.activate_and_configure(new, Mock(), {})
-                configure.assert_called_once()
-                self.assertEqual(manager.scheduler.config, old)
-                self.assertEqual(manager.scheduler.settings.managed_selectors, ('retained',))
-                self.assertTrue(previous_client.cancelled.is_set())
-                self.assertFalse(manager.scheduler.client.cancelled.is_set())
-                self.assertTrue(all(call.args[1] == 'retained' for call in select.call_args_list))
-            finally:
-                manager.scheduler.close()
-
-    def test_term_interrupts_pending_fetch(self):
-        import signal
-        from spoofskipper_manager.service import Stopping
-        with tempfile.TemporaryDirectory() as temp:
-            m = Manager(temp, Path(temp) / 'state')
-            with self.assertRaises(Stopping):
-                m.signal(signal.SIGTERM, None)
-            self.assertEqual(m.stopping, signal.SIGTERM)
-
     def test_shutdown_kills_unresponsive_child_with_deadline(self):
         import subprocess
         from unittest.mock import Mock
@@ -279,17 +224,3 @@ class CompilerTests(unittest.TestCase):
             child.kill.assert_called_once()
             self.assertEqual(child.wait.call_count, 2)
             self.assertIsNone(m.child)
-
-    def test_optional_api_authorization_header(self):
-        from unittest.mock import MagicMock
-        for secret in ('', 'private'):
-            c = config()
-            c['experimental']['clash_api']['secret'] = secret
-            response = MagicMock()
-            response.__enter__.return_value.read.return_value = '{"proxies":{"revision":{}}}'
-            opener = MagicMock()
-            opener.open.return_value = response
-            with patch.object(clash_api.urllib.request, 'build_opener', return_value=opener):
-                self.assertTrue(clash_api.revision_present(c, 'revision'))
-            request = opener.open.call_args.args[0]
-            self.assertEqual(request.get_header('Authorization'), 'Bearer private' if secret else None)

@@ -7,8 +7,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler, service
-from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
-from spoofskipper_manager.scheduler import Health, Scheduler
+from spoofskipper_manager.scheduler import Scheduler
 from spoofskipper_manager.state import write_json
 
 

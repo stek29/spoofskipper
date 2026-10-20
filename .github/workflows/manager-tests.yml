@@ -1,4 +1,4 @@
-name: Manager unit tests
+name: Manager tests
 on: [push, pull_request]
 permissions:
   contents: read
@@ -11,3 +11,13 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m unittest discover -s sing-box/manager/tests/unit
+  lifecycle:
+    # Activation, rollback and refresh end to end against the fake core.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y jsonnet
+      - run: python3 -m unittest discover -s sing-box/manager/tests/integration -p test_lifecycle.py -v

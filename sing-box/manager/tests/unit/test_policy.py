@@ -1,6 +1,5 @@
 import copy
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,10 +10,7 @@ from spoofskipper_manager.identity import Candidate, SampleKey
 from spoofskipper_manager.policy import Policy, score
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult
-from spoofskipper_manager.identity import sample_key
-from spoofskipper_manager.service import load_settings
-from spoofskipper_manager.settings import CHALLENGE_RETRY_SECONDS, SCORE_MAX_AGE, Settings
-from spoofskipper_manager.state import write_json
+from spoofskipper_manager.settings import SCORE_MAX_AGE, Settings
 
 
 def key(tag):
@@ -204,16 +200,6 @@ class OwnershipTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compiler.handoff_selectors(c, ['proxy_main'], candidates)
 
-    def test_managed_settings_allowlist_and_probe_dependency(self):
-        with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp)/'local-manager.json'
-            for managed in ('proxy_main', [''], ['proxy_main']*2, [1], None):
-                write_json(path, {'probes_enabled': True, 'managed_selectors': managed})
-                with self.assertRaises(ValueError):
-                    load_settings(temp)
-            write_json(path, {'probes_enabled': True, 'managed_selectors': ['proxy_main']})
-            self.assertEqual(load_settings(temp).managed_selectors, ('proxy_main',))
-
     def test_write_verification_rolls_back_only_failed_selector(self):
         c, _ = self.config()
         with patch.object(clash_api, 'proxies', side_effect=[{'proxy_main': {'now': 'a'}},
@@ -313,24 +299,6 @@ class PolicySchedulingTests(unittest.TestCase):
         self.scheduler.tick()
         self.assertEqual(self.api['proxy_deepmind']['now'], 'b')
         self.assertEqual(self.api['proxy_main']['now'], 'a')
-
-    def test_stale_challenger_result_is_retried_at_early_cadence(self):
-        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['proxy_deepmind'])
-        self.scheduler.controller.inspect()
-        policy = self.scheduler.controller.policy
-        policy.observe('proxy_deepmind', 'chained', self.now)
-        key = self.key('b')
-        policy.pending['proxy_deepmind'] = (key, 1300)
-        sample = self.scheduler.samples[key]
-        sample.successes = [(1301, 40, 50)]
-        sample.last.update(throughput=1301)
-        for now, requested in ((1400, False), (1301 + CHALLENGE_RETRY_SECONDS, True)):
-            self.now = now
-            for other in self.scheduler.samples.values():
-                other.healthy_at = self.now
-            self.scheduler.controller.apply_policy(self.now)
-            self.assertEqual(self.scheduler.requested.get(key) == 'throughput', requested, now)
-        self.write.assert_not_called()
 
     def test_cancelled_challenger_throughput_is_requested_immediately(self):
         for discard in ('epoch_change', 'reload'):

@@ -1,13 +1,7 @@
 """Pinned-core verification; exercised by the offline Compose harness."""
-import json
-import os
 import shutil
 import signal
-import subprocess
-import sys
-import tempfile
 import unittest
-from pathlib import Path
 
 import test_lifecycle
 from test_lifecycle import wait_for

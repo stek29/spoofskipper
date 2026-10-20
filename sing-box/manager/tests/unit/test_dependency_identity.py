@@ -3,17 +3,14 @@ import copy
 from concurrent.futures import Future
 from pathlib import Path
 import sys
-import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from spoofskipper_manager import clash_api, compiler, service
-from spoofskipper_manager.settings import Settings
-from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
+from spoofskipper_manager import clash_api
+from spoofskipper_manager.probes import Probe, ProbeResult
 from spoofskipper_manager.identity import sample_key
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
-from spoofskipper_manager.state import write_json
 
 
 class DependencyIdentityTests(unittest.TestCase):
