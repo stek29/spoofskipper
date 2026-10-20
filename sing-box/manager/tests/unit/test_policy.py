@@ -219,7 +219,7 @@ class OwnershipTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     load_settings(temp)
             write_json(path, {'probes_enabled': True, 'managed_selectors': ['proxy_main']})
-            self.assertEqual(load_settings(temp)['managed_selectors'], ['proxy_main'])
+            self.assertEqual(load_settings(temp).managed_selectors, ('proxy_main',))
 
     def test_write_verification_rolls_back_only_failed_selector(self):
         c, _ = self.config()
@@ -308,7 +308,7 @@ class PolicySchedulingTests(unittest.TestCase):
         self.assertEqual(self.scheduler.accounting.summary()['today']['challenger_tests'], 1)
 
     def test_preferred_return_executes_both_post_hold_tests(self):
-        self.scheduler.settings['managed_selectors'] = ['proxy_deepmind']
+        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['proxy_deepmind'])
         self.scheduler.tick()
         self.now += 300
         for s in self.scheduler.samples.values():
@@ -340,7 +340,7 @@ class PolicySchedulingTests(unittest.TestCase):
 
     def test_upstream_write_drains_and_invalidates_chained_samples(self):
         from concurrent.futures import Future
-        self.scheduler.settings['managed_selectors'] = ['chained_upstream']
+        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['chained_upstream'])
         self.scheduler.inspect()
         chained = self.key('chained')
         future = Future()

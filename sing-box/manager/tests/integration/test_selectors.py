@@ -89,7 +89,7 @@ class SelectorIntegrationTests(unittest.TestCase):
             before = clash_api.proxies(old)
             new = copy.deepcopy(old)
             new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX+'new'
-            manager.settings.update(managed_selectors=['traffic', 'restricted'], probes_enabled=True)
+            manager.settings = manager.settings.with_changes(managed_selectors=['traffic', 'restricted'], probes_enabled=True)
             compiler.handoff_selectors(new, manager.settings['managed_selectors'], [{'outbound': o} for o in leaves])
             real = clash_api.select
             failed = False
@@ -120,7 +120,7 @@ class SelectorIntegrationTests(unittest.TestCase):
         for secret in ('', 'fixture-secret'):
             with self.subTest(secret=bool(secret)):
                 manager = Manager(self.config, self.root/('auth' if secret else 'open'))
-                manager.settings.update(managed_selectors=['traffic'], probes_enabled=True)
+                manager.settings = manager.settings.with_changes(managed_selectors=['traffic'], probes_enabled=True)
                 leaves = [{'type': 'trojan', 'tag': t, 'server': '127.0.0.1', 'server_port': 1,
                            'password': 'synthetic'} for t in ('a/🇩🇪', 'b')]
                 candidates = [{'outbound': o, 'provider': 'p', 'weight': 1} for o in leaves]

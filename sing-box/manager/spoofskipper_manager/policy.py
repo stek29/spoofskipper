@@ -3,8 +3,7 @@ from dataclasses import dataclass
 import statistics
 import math
 
-HOLD = 300
-MARGIN = 1.15
+from .settings import HOLD, MARGIN, ACTIVE_SCORE_MAX_AGE, FRESH_SAMPLE_SECONDS
 
 
 def score(sample, weight, now, max_age):
@@ -50,7 +49,7 @@ class Policy:
         def value(k, maximum=age):
             return score(samples[k], allowed[k]['weight'], now, maximum)
         def rank(k, maximum=age):
-            v = value(k, 7200 if k == active and math.isfinite(maximum) else maximum)
+            v = value(k, ACTIVE_SCORE_MAX_AGE if k == active and math.isfinite(maximum) else maximum)
             return (v is not None, v or 0, -(samples[k].latency_or_inf), k)
         def unknown(k):
             return samples[k].healthy is not False and not healthy(k)
@@ -85,7 +84,7 @@ class Policy:
             self.pending.pop(selector, None)
             return Decision(None, 'current_best')
         if not boundary:
-            current_score, challenger_score = value(active, 7200), value(best)
+            current_score, challenger_score = value(active, ACTIVE_SCORE_MAX_AGE), value(best)
             if challenger_score is None or (current_score is not None and challenger_score < current_score*MARGIN):
                 self.pending.pop(selector, None)
                 return Decision(None, 'margin_or_performance_unknown')
@@ -103,19 +102,19 @@ class Policy:
         # longer than the freshness window; use the later completion for the pair.
         measured_at = max(s.throughput_at, s.throttle_at) if boundary else s.throughput_at
         waiting_for_pair = boundary and s.throttle_at < since
-        fresh = s.throughput_at >= since and (waiting_for_pair or now-measured_at <= 30)
+        fresh = s.throughput_at >= since and (waiting_for_pair or now-measured_at <= FRESH_SAMPLE_SECONDS)
         tests = []
         if not fresh:
             tests.append((best, 'throughput'))
-        if boundary and (s.throttle_at < since or (s.throughput_at >= since and now-measured_at > 30)):
+        if boundary and (s.throttle_at < since or (s.throughput_at >= since and now-measured_at > FRESH_SAMPLE_SECONDS)):
             tests.append((best, 'throttle'))
         if tests:
             return Decision(None, 'priority_return_test' if boundary else 'challenger_test', tuple(tests))
-        score_age = max(30, now-s.throughput_at) if boundary else 30
+        score_age = max(FRESH_SAMPLE_SECONDS, now-s.throughput_at) if boundary else FRESH_SAMPLE_SECONDS
         if s.body_failed or value(best, score_age) is None:
             return Decision(None, 'challenger_performance_unknown')
         if not boundary:
-            incumbent = value(active, 7200)
-            if incumbent is not None and value(best, 30) < incumbent*MARGIN:
+            incumbent = value(active, ACTIVE_SCORE_MAX_AGE)
+            if incumbent is not None and value(best, FRESH_SAMPLE_SECONDS) < incumbent*MARGIN:
                 return Decision(None, 'fresh_challenger_margin')
         return Decision(best, 'priority_return' if boundary else 'score_improvement')

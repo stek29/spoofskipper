@@ -13,11 +13,10 @@ import time
 from urllib.parse import urlsplit
 
 GATE, THROTTLE, SKIP, TOTAL = 1, 256 * 1024, 512 * 1024, 8 * 1024 * 1024
-DEFAULTS = {'gate_active_seconds': 60, 'gate_standby_seconds': 480,
-            'throttle_seconds': 300, 'throughput_active_seconds': 3600,
-            'throughput_shortlist_seconds': 21600, 'throughput_sweep_seconds': 172800,
-            'probe_timeout': 15, 'probe_stall_timeout': 2, 'throughput_seconds': 4,
-            'probe_workers': 4, 'probe_port': 19090, 'early_test_seconds': 1800}
+from .settings import Settings, NUMERIC_DEFAULTS
+
+# Kept as a numeric defaults mapping for public measurement/test helpers.
+DEFAULTS = NUMERIC_DEFAULTS
 
 
 def sample_key(outbound):
@@ -145,7 +144,7 @@ def validate_response(response, expected, ranged, head):
 
 class ProbeClient:
     def __init__(self, settings, accounting=None, clock=time.monotonic):
-        self.settings, self.clock = {**DEFAULTS, **settings}, clock
+        self.settings, self.clock = Settings.from_mapping(settings), clock
         self.accounting = accounting or Accounting()
         self.context = ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
         self.cancelled = threading.Event()
@@ -243,10 +242,10 @@ class ProbeClient:
 
     def run(self, outbound, kind):
         size = {'gate': GATE, 'throttle': THROTTLE, 'throughput': TOTAL}[kind]
-        url = self.settings.get('probe_url', 'https://speed.cloudflare.com/__down?bytes={bytes}').replace('{bytes}', str(size))
+        url = self.settings.probe_url.replace('{bytes}', str(size))
         return self.request(outbound, url, kind)
 
     def corroborate(self, outbound, body=False):
-        url = self.settings.get('probe_backup_url', 'https://proof.ovh.net/files/1Mb.dat')
+        url = self.settings.probe_backup_url
         result = self.request(outbound, url, 'gate', backup=True, head=True)
         return self.request(outbound, url, 'throttle', backup=True) if body and result['ok'] else result

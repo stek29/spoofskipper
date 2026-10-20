@@ -71,4 +71,4 @@ class GenericPolicyTests(unittest.TestCase):
                     load_settings(temp)
             write_json(path, {'probes_enabled': True, 'managed_selectors': ['arbitrary'],
                               'selector_priorities': {'arbitrary': [['provider-a', 'provider-b'], ['local-proxy']]}})
-            self.assertEqual(load_settings(temp)['managed_selectors'], ['arbitrary'])
+            self.assertEqual(load_settings(temp).managed_selectors, ('arbitrary',))

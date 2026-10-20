@@ -7,6 +7,8 @@ import weakref
 from . import clash_api
 from .probes import Accounting, DEFAULTS, THROTTLE, ProbeClient, sample_key
 from .policy import Policy, score
+from .settings import (Settings, ACTIVE_SCORE_MAX_AGE, INSPECT_SECONDS, SUMMARY_SECONDS,
+                       GATE_FAILURE_THRESHOLD)
 from .compiler import probe_outbounds, selectors, selector_members
 
 
@@ -74,7 +76,7 @@ class Sample:
             if kind != 'gate':
                 self.health = Health.SUSPECT_BODY
                 self.corroborate = 'corroborate_body'
-            elif self.failures >= 3:
+            elif self.failures >= GATE_FAILURE_THRESHOLD:
                 self.corroborate = 'corroborate_gate'
             return
         self.failures = 0
@@ -129,7 +131,7 @@ class Scheduler:
         self.log, self.clock = log, clock
         self.pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix='probe')
         self.samples, self.candidates, self.jobs = {}, {}, {}
-        self.epoch, self.config, self.settings = 0, None, dict(DEFAULTS)
+        self.epoch, self.config, self.settings = 0, None, Settings()
         self.started = clock()
         self.paths, self.path_versions, self.proxy_choices = {}, {}, {}
         self.active, self.last_inspect, self.last_summary = {}, float('-inf'), clock()
@@ -142,7 +144,7 @@ class Scheduler:
 
     def configure(self, config, candidates, settings):
         self.epoch += 1
-        self.config, self.settings = config, {**DEFAULTS, **settings}
+        self.config, self.settings = config, Settings.from_mapping(settings)
         enabled = settings.get('probes_enabled', False)
         subscribed = {c['outbound']['tag']: c for c in candidates}
         entries = []
@@ -165,7 +167,7 @@ class Scheduler:
         """Apply revocations now; new ownership/probes require a checked render."""
         old = self.settings.get('managed_selectors', [])
         allowed = [tag for tag in old if tag in settings.get('managed_selectors', [])]
-        self.settings = {**self.settings, 'managed_selectors': allowed}
+        self.settings = self.settings.with_changes(managed_selectors=allowed)
         for tag in set(old) - set(allowed):
             self.policy.choices.pop(tag, None)
             self.policy.switched_at.pop(tag, None)
@@ -175,7 +177,7 @@ class Scheduler:
             if self.client is not None or self.jobs:
                 self.invalidate()
             self.client = None
-            self.settings['probes_enabled'] = False
+            self.settings = self.settings.with_changes(probes_enabled=False)
         self.requested = {}
 
     def update_paths(self, proxies):
@@ -297,14 +299,14 @@ class Scheduler:
         self.collect(now)
         if not self.client:
             return
-        if now-self.last_inspect >= 5:
+        if now-self.last_inspect >= INSPECT_SECONDS:
             try:
                 self.inspect()
             except Exception as exc:
                 self.log('probe_inspection_failed', error=type(exc).__name__)
             self.last_inspect = now
         self.apply_policy(now)
-        if now-self.last_summary >= 3600:
+        if now-self.last_summary >= SUMMARY_SECONDS:
             self.summary(now)
             self.last_summary = now
         busy = {key for key, _, _ in self.jobs.values()}
@@ -357,7 +359,7 @@ class Scheduler:
                 if key:
                     sample = self.samples[key]
                     compared.append({'candidate': tag, 'score': score(sample, self.candidates[key]['weight'], now,
-                        7200 if tag == self.active[selector] else self.settings['throughput_sweep_seconds']),
+                        ACTIVE_SCORE_MAX_AGE if tag == self.active[selector] else self.settings['throughput_sweep_seconds']),
                         'sample_age': now-sample.throughput_at if sample.successes else None})
             signature = (decision.reason, target, pending)
             if self.last_decisions.get(selector) != signature:
@@ -394,7 +396,7 @@ class Scheduler:
             for key, c in allowed:
                 sample = self.samples[key]
                 if sample.healthy and not sample.body_failed:
-                    value = score(sample, c['weight'], now, 7200 if key[0] in self.active.values() else self.settings['throughput_sweep_seconds'])
+                    value = score(sample, c['weight'], now, ACTIVE_SCORE_MAX_AGE if key[0] in self.active.values() else self.settings['throughput_sweep_seconds'])
                     ranked.append((value is not None, value or 0, -(sample.latency_or_inf), key[0]))
             best = max(ranked) if ranked else None
             choices[selector] = {'active': self.active.get(selector), 'proposed': best[3] if best else None,
@@ -403,7 +405,7 @@ class Scheduler:
             for key, c in self.candidates.items():
                 if key[0] == self.active.get(selector):
                     sample = self.samples[key]
-                    choices[selector].update(score=score(sample, c['weight'], now, 7200),
+                    choices[selector].update(score=score(sample, c['weight'], now, ACTIVE_SCORE_MAX_AGE),
                         sample_age=now-sample.throughput_at if sample.successes else None)
         for selector, signature in self.last_decisions.items():
             if selector in self.settings.get('managed_selectors', []):

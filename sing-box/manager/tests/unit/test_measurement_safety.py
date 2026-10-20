@@ -105,7 +105,7 @@ class MeasurementSafetyTests(unittest.TestCase):
                 manager = service.Manager(root, root)
             try:
                 self.assertFalse(manager.settings['probes_enabled'])
-                self.assertEqual(manager.settings['managed_selectors'], [])
+                self.assertEqual(manager.settings['managed_selectors'], ())
                 self.assertIn('probe_timeout', manager.settings)
                 self.assertFalse((root / 'providers' / '.manager-abandoned').exists())
                 log.assert_called_once_with('settings_invalid_using_saved_config',

@@ -430,7 +430,7 @@ class ProbeIntegrationTests(unittest.TestCase):
 
     def test_slow_throughput_with_insufficient_prefix_is_unknown(self):
         self.mode = 'slow'
-        self.client.settings['throughput_seconds'] = .08
+        self.client.settings = self.client.settings.with_changes(throughput_seconds=.08)
         result = self.client.run(self.outbound, 'throughput')
         self.assertTrue(result['ok'], result)
         self.assertTrue(result['early_stop'])

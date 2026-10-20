@@ -1,10 +1,7 @@
 """PID 1 supervision and serialized, marker-protected activation."""
 import json
-import math
 import os
 import signal
-import ssl
-from urllib.parse import urlsplit
 import shutil
 import subprocess
 import tempfile
@@ -14,68 +11,11 @@ from . import compiler, clash_api
 from .state import atomic_write, write_json, remove
 from .subscriptions import Providers
 from .scheduler import Scheduler, resolve
-from .probes import DEFAULTS as PROBE_DEFAULTS
+from .settings import Settings, load_settings
 
 
 def log(event, **fields):
     print(json.dumps({'event': event, **fields}, ensure_ascii=False), flush=True)
-
-
-DEFAULTS = {'refresh_seconds': 7200, 'revision_timeout': 30, 'shutdown_timeout': 10,
-            'bootstrap_backoff_seconds': 5, 'bootstrap_backoff_max_seconds': 300}
-
-
-def load_settings(config_dir):
-    path = Path(config_dir) / 'local-manager.json'
-    settings = json.loads(path.read_text()) if path.exists() else {}
-    if not isinstance(settings, dict):
-        raise ValueError('manager settings must be an object')
-    managed = settings.setdefault('managed_selectors', [])
-    if (not isinstance(settings.get('probes_enabled', False), bool) or not isinstance(managed, list)
-            or any(not isinstance(s, str) or not s for s in managed)
-            or len(set(managed)) != len(managed)):
-        raise ValueError('invalid probes_enabled or managed_selectors')
-    if managed and not settings.get('probes_enabled', False):
-        raise ValueError('managed selectors require probes_enabled')
-    priorities = settings.get('selector_priorities', {})
-    if not isinstance(priorities, dict):
-        raise ValueError('selector_priorities must be an object')
-    for selector, tiers in priorities.items():
-        if (not isinstance(selector, str) or not selector or not isinstance(tiers, list) or not tiers
-                or any(not isinstance(tier, list) or not tier or
-                       any(not isinstance(p, str) or not p for p in tier) for tier in tiers)):
-            raise ValueError('invalid selector priority tiers')
-        providers = [p for tier in tiers for p in tier]
-        if len(set(providers)) != len(providers):
-            raise ValueError('duplicate provider in selector priorities')
-    weights = settings.get('provider_weights', {})
-    if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
-            or not math.isfinite(w) or w <= 0 for w in weights.values()):
-        raise ValueError('provider weights must be positive finite numbers')
-    for key, default in {**DEFAULTS, **PROBE_DEFAULTS}.items():
-        value = settings.setdefault(key, default)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
-            raise ValueError('invalid manager deadline/cadence')
-    for key, maximum in (('probe_workers', 4), ('probe_port', 65535)):
-        if not isinstance(settings[key], int) or settings[key] > maximum:
-            raise ValueError('invalid probe worker count/port')
-    if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
-        raise ValueError('probe deadlines exceed bounded maximum')
-    for key in ('probe_url', 'probe_backup_url'):
-        if key in settings and not isinstance(settings[key], str):
-            raise ValueError('invalid probe URL')
-    if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
-        raise ValueError('probe_ca_bundle must be a file path')
-    if settings.get('probes_enabled', False):
-        ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
-        for key, default in (('probe_url', 'https://speed.cloudflare.com/__down?bytes={bytes}'),
-                             ('probe_backup_url', 'https://proof.ovh.net/files/1Mb.dat')):
-            url = urlsplit(settings.get(key, default))
-            if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
-                raise ValueError('probe endpoint must be HTTPS')
-        if '{bytes}' not in settings.get('probe_url', '{bytes}'):
-            raise ValueError('probe_url requires {bytes}')
-    return settings
 
 
 class Stopping(BaseException):
@@ -101,8 +41,7 @@ class Manager:
         except (ValueError, OSError):
             if not self.live.exists():
                 raise
-            self.settings = {**DEFAULTS, **PROBE_DEFAULTS, 'probes_enabled': False,
-                             'managed_selectors': [], 'provider_weights': {}, 'selector_priorities': {}}
+            self.settings = Settings()
             log('settings_invalid_using_saved_config', probes_enabled=False, managed_selectors=[],
                 fallback='native_selectors')
         self.child = None
@@ -256,8 +195,8 @@ class Manager:
         self.current = old
         remove(self.marker)
         if self.scheduler.config is not None:
-            safe = {**self.scheduler.settings, 'managed_selectors': [tag for tag in
-                self.scheduler.settings.get('managed_selectors', []) if tag in managed]}
+            safe = self.scheduler.settings.with_changes(managed_selectors=tuple(
+                tag for tag in self.scheduler.settings.managed_selectors if tag in managed))
             self.scheduler.configure(old, list(self.scheduler.candidates.values()), safe)
         log('rollback_succeeded', revision=compiler.revision(old))
         raise ValueError('new configuration rolled back')

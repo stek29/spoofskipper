@@ -60,7 +60,7 @@ class RefreshFailureTests(unittest.TestCase):
                     self.assertTrue(submit.called)
                     self.assertTrue(all(call.args[2] == expected for call in submit.call_args_list))
                 else:
-                    self.assertEqual(scheduler.settings['managed_selectors'], [])
+                    self.assertEqual(scheduler.settings['managed_selectors'], ())
                     if case == 'disable':
                         self.assertIsNone(scheduler.client)
                         self.assertTrue(clients[0].cancelled.is_set())
@@ -154,11 +154,11 @@ class EvidenceTests(unittest.TestCase):
     def test_revocation_does_not_grant_new_ownership_or_reuse_old_hold(self):
         scheduler = Scheduler(lambda *args, **kw: None)
         try:
-            scheduler.settings['managed_selectors'] = ['proxy_main']
+            scheduler.settings = scheduler.settings.with_changes(managed_selectors=['proxy_main'])
             scheduler.policy.observe('proxy_main', 'a', 100)
             scheduler.policy.pending['proxy_main'] = (('b', 'hash'), 400)
             scheduler.restrict({'probes_enabled': True, 'managed_selectors': ['proxy_deepmind']})
-            self.assertEqual(scheduler.settings['managed_selectors'], [])
+            self.assertEqual(scheduler.settings['managed_selectors'], ())
             self.assertNotIn('proxy_main', scheduler.policy.choices)
             self.assertNotIn('proxy_main', scheduler.policy.pending)
         finally:
