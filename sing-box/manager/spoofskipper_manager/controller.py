@@ -33,7 +33,7 @@ class SelectorController:
     def apply_policy(self, now):
         measurements = self.measurements
         measurements.requested = {}
-        managed = measurements.settings.get('managed_selectors', [])
+        managed = measurements.settings.managed_selectors
         for selector in selectors(measurements.config):
             if selector not in managed or selector not in measurements.active:
                 continue

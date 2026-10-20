@@ -90,7 +90,7 @@ class SelectorIntegrationTests(unittest.TestCase):
             new = copy.deepcopy(old)
             new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX+'new'
             manager.settings = manager.settings.with_changes(managed_selectors=['traffic', 'restricted'], probes_enabled=True)
-            compiler.handoff_selectors(new, manager.settings['managed_selectors'], [{'outbound': o} for o in leaves])
+            compiler.handoff_selectors(new, manager.settings.managed_selectors, [{'outbound': o} for o in leaves])
             real = clash_api.select
             failed = False
             def write(config, selector, target, managed, **kw):

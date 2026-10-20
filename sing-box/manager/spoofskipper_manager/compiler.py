@@ -8,6 +8,7 @@ from .clash_api import credentials
 from .state import atomic_write
 from .graph import OutboundGraph
 from .identity import identity
+from .settings import Settings
 
 REVISION_PREFIX = '__spoofskipper_revision_'
 def validate(config):
@@ -53,9 +54,10 @@ def render(template, subscriptions, scratch, settings=None, candidates=(), api_s
     finally:
         shutil.rmtree(root, ignore_errors=True)
         ext.unlink(missing_ok=True)
-    ensure_clash_api(config, (settings or {}).get('clash_api_port', 19089), api_secret)
-    add_probe_routes(config, settings or {}, candidates)
-    handoff_selectors(config, (settings or {}).get('managed_selectors', []), candidates)
+    settings = Settings.from_mapping(settings or {})
+    ensure_clash_api(config, settings.clash_api_port, api_secret)
+    add_probe_routes(config, settings, candidates)
+    handoff_selectors(config, settings.managed_selectors, candidates)
     validate(config)
     if any(o['tag'].startswith(REVISION_PREFIX) for o in config.get('outbounds', [])):
         raise ValueError('reserved revision tag prefix')
@@ -89,14 +91,15 @@ def probe_outbounds(config, candidates=()):
 
 
 def add_probe_routes(config, settings, candidates):
-    if not settings.get('probes_enabled', False):
+    settings = Settings.from_mapping(settings)
+    if not settings.probes_enabled:
         return
     if any(i.get('tag') == PROBE_TAG for i in config.get('inbounds', [])):
         raise ValueError('reserved probe inbound tag')
     outbounds = probe_outbounds(config, candidates)
     config.setdefault('inbounds', []).append({
         'type': 'mixed', 'tag': PROBE_TAG, 'listen': '127.0.0.1',
-        'listen_port': settings.get('probe_port', 19090),
+        'listen_port': settings.probe_port,
         'users': [{'username': identity(o)[0], 'password': identity(o)[1]} for o in outbounds]})
     # First rules prevent production routing from shadowing authenticated probes.
     rules = [{'inbound': [PROBE_TAG], 'auth_user': [identity(o)[0]],

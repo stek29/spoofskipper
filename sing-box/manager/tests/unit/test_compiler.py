@@ -100,7 +100,7 @@ class CompilerTests(unittest.TestCase):
 
     def test_settings_observe_only_guards(self):
         with tempfile.TemporaryDirectory() as temp:
-            self.assertFalse(load_settings(temp).get('probes_enabled', False))
+            self.assertFalse(load_settings(temp).probes_enabled)
             for data in ({'probes_enabled': 'yes'}, {'managed_selectors': ['proxy_main']},
                          {'provider_weights': {'a': -1}}, {'revision_timeout': 0}):
                 write_json(Path(temp) / 'local-manager.json', data)

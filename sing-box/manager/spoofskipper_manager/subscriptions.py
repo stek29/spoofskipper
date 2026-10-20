@@ -4,6 +4,7 @@ import json
 import time
 from pathlib import Path
 from .parser import apply_outbound_settings, merge_outputs, read_outbound_settings, render_subscription
+from .settings import Settings
 from .state import write_json
 
 
@@ -71,7 +72,7 @@ class Providers:
                               if s['prefix'] in snapshots])
 
     def candidates(self, snapshots):
-        weights = self.settings.get('provider_weights', {})
+        weights = Settings.from_mapping(self.settings).provider_weights
         return [{'provider': prefix, 'weight': weights.get(prefix, 1.0), 'outbound': outbound}
                 for prefix, snapshot in snapshots.items() for outbound in snapshot['output']['outbounds']]
 

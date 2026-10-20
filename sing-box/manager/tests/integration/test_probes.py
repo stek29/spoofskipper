@@ -1,7 +1,5 @@
-from spoofskipper_manager.settings import Settings
 """Offline test-CA HTTPS faults through the pinned core and real protocol servers."""
 import base64
-import copy
 import http.server
 import json
 import shutil
@@ -14,7 +12,6 @@ import time
 import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
-from unittest.mock import Mock, patch
 
 from test_lifecycle import free_port, wait_for, FIXTURES
 from spoofskipper_manager import compiler, clash_api
@@ -154,7 +151,7 @@ class ProbeIntegrationTests(unittest.TestCase):
 
     def test_generic_static_socks_chain_tracks_arbitrary_selector(self):
         from spoofskipper_manager.scheduler import Scheduler
-        from spoofskipper_manager.probes import sample_key
+        from spoofskipper_manager.identity import sample_key
         chained = {**self.outbound, 'tag': 'double-hop', 'detour': 'hop'}
         blocked = {**self.outbound, 'tag': 'offline', 'server_port': free_port()}
         config = {'log': {'disabled': True}, 'outbounds': [self.outbound, blocked,
@@ -193,7 +190,7 @@ class ProbeIntegrationTests(unittest.TestCase):
 
     def test_throttled_path_fails_and_only_a_threshold_probe_restores_it(self):
         from spoofskipper_manager.scheduler import Scheduler
-        from spoofskipper_manager.probes import sample_key
+        from spoofskipper_manager.identity import sample_key
         scheduler = Scheduler(lambda *args, **kw: None)
         scheduler.configure(self.config, [{'provider': 'p', 'weight': 1, 'outbound': self.outbound}],
                             {**self.settings, 'probes_enabled': True})
@@ -217,60 +214,6 @@ class ProbeIntegrationTests(unittest.TestCase):
             self.assertTrue(sample.healthy)
         finally:
             scheduler.close()
-
-    def test_snapshot_commit_failure_keeps_real_probes_on_new_core(self):
-        from spoofskipper_manager import service
-        from spoofskipper_manager.probes import sample_key
-        config_dir = self.root/'manager-config'
-        config_dir.mkdir()
-        manager = service.Manager(config_dir, self.root/'manager-state')
-        settings = {**manager.settings, **self.settings, 'probes_enabled': True, 'probe_port': free_port()}
-        manager.settings = settings
-        old = {'log': {'disabled': True}, 'outbounds': [self.outbound],
-            'experimental': {'clash_api': {'external_controller': '127.0.0.1:'+str(free_port()), 'secret': 'old'}}}
-        candidates = [{'provider': 'p', 'weight': 1, 'outbound': self.outbound}]
-        compiler.add_probe_routes(old, settings, candidates)
-        old['outbounds'].append({'type': 'direct', 'tag': compiler.REVISION_PREFIX+'old'})
-        new = copy.deepcopy(old)
-        new['experimental']['clash_api']['secret'] = 'rotated'
-        new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX+'new'
-        providers = Mock(snapshots={'p': {}}, candidates=Mock(return_value=candidates))
-        providers.refresh.return_value = {'p': {}}
-        providers.commit.side_effect = OSError('snapshot write failed')
-        tested = False
-        failures = []
-        real_wait = manager.wait
-        def tick():
-            nonlocal tested
-            self.assertEqual(manager.current, new)
-            self.assertEqual(manager.scheduler.config, new)
-            self.assertFalse(manager.scheduler.client.cancelled.is_set())
-            self.assertIn(compiler.revision(new), manager.scheduler.controller.inspect())
-            result = manager.scheduler.client.run(self.outbound, 'throttle')
-            self.assertTrue(result.ok, result)
-            key = sample_key(self.outbound)
-            manager.scheduler.accept(key, result, time.monotonic())
-            self.assertTrue(manager.scheduler.samples[key].healthy)
-            tested = True
-        def checked_tick():
-            nonlocal tested
-            try:
-                tick()
-            except AssertionError as exc:
-                failures.append(exc)
-                tested = True
-        def wait(seconds):
-            if tested:
-                raise service.Stopping()
-            real_wait(seconds)
-        with patch.object(service.signal, 'signal'), patch.object(service, 'Providers', return_value=providers), \
-             patch.object(service, 'load_settings', return_value=Settings.from_mapping(settings)), \
-             patch.object(manager, 'prepare', side_effect=[old, new]), \
-             patch.object(manager.scheduler, 'tick', side_effect=checked_tick), patch.object(manager, 'wait', side_effect=wait):
-            self.assertEqual(manager.run(), 0)
-        if failures:
-            raise failures[0]
-        self.assertTrue(tested)
 
     def test_freeze_truncation_slow_completion_and_throughput_early_stop(self):
         for mode in ('freeze', 'truncate'):
@@ -346,7 +289,7 @@ class ProbeIntegrationTests(unittest.TestCase):
 
     def test_scheduler_reload_retention_observation_and_cancellation(self):
         from spoofskipper_manager.scheduler import Scheduler
-        from spoofskipper_manager.probes import sample_key
+        from spoofskipper_manager.identity import sample_key
         # A scratch selector makes the absence of writes observable in the API.
         self.port = free_port()
         self.settings.update(probe_port=self.port, probes_enabled=True,

@@ -61,11 +61,12 @@ class Scheduler:
 
     def restrict(self, settings):
         """Apply revocations now; new ownership/probes require a checked render."""
-        old = self.settings.get('managed_selectors', [])
-        allowed = [tag for tag in old if tag in settings.get('managed_selectors', [])]
+        settings = Settings.from_mapping(settings)
+        old = self.settings.managed_selectors
+        allowed = [tag for tag in old if tag in settings.managed_selectors]
         self.settings = self.settings.with_changes(managed_selectors=allowed)
         self.controller.revoke(set(old) - set(allowed))
-        if not settings.get('probes_enabled', False):
+        if not settings.probes_enabled:
             if self.client is not None or self.jobs:
                 self.invalidate()
             self.client = None
@@ -180,15 +181,15 @@ class Scheduler:
         active = key.tag in self.active.values()
         if sample.confirm:
             return sample.confirm
-        if now >= last(Probe.GATE) + settings['gate_active_seconds' if active else 'gate_standby_seconds']:
+        if now >= last(Probe.GATE) + (settings.gate_active_seconds if active else settings.gate_standby_seconds):
             return Probe.GATE
         if sample.health is not Health.HEALTHY:
             # Reachable but unproven (or failed): check the threshold once per gate success.
             return Probe.THROTTLE if sample.reachable_at > last(Probe.THROTTLE) else None
-        if active and now >= last(Probe.THROTTLE) + settings['throttle_seconds']:
+        if active and now >= last(Probe.THROTTLE) + settings.throttle_seconds:
             return Probe.THROTTLE
         if active or key in shortlisted:
-            cadence = settings['throughput_active_seconds' if active else 'throughput_shortlist_seconds']
+            cadence = settings.throughput_active_seconds if active else settings.throughput_shortlist_seconds
             if now >= last(Probe.THROUGHPUT) + cadence:
                 return Probe.THROUGHPUT
         return None
@@ -225,7 +226,7 @@ class Scheduler:
             if probe is None:
                 continue
             if probe is Probe.GATE:
-                if gates >= self.settings['probe_workers']:
+                if gates >= self.settings.probe_workers:
                     continue
                 gates += 1
             else:

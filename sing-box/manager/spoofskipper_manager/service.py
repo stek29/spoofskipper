@@ -102,7 +102,7 @@ class Manager:
         if self.alive():
             self.child.send_signal(self.stopping or signal.SIGTERM)
             try:
-                self.child.wait(timeout=self.settings['shutdown_timeout'])
+                self.child.wait(timeout=self.settings.shutdown_timeout)
             except subprocess.TimeoutExpired:
                 self.child.kill()
                 self.child.wait()
@@ -111,7 +111,7 @@ class Manager:
         self.child = None
 
     def verify(self, config):
-        deadline = time.monotonic() + self.settings['revision_timeout']
+        deadline = time.monotonic() + self.settings.revision_timeout
         tag = compiler.revision(config)
         while time.monotonic() < deadline:
             if self.stopping:
@@ -119,7 +119,7 @@ class Manager:
             if not self.alive():
                 return False
             try:
-                if clash_api.revision_present(config, tag, timeout=min(1, self.settings['revision_timeout'])):
+                if clash_api.revision_present(config, tag, timeout=min(1, self.settings.revision_timeout)):
                     log('revision_verified', revision=tag)
                     return True
             except Exception:
@@ -304,7 +304,7 @@ class Manager:
                     pending = None
             fetched = False
             next_refresh = 0
-            backoff = self.settings['bootstrap_backoff_seconds']
+            backoff = self.settings.bootstrap_backoff_seconds
             while True:
                 if self.stopping:
                     raise Stopping()
@@ -327,25 +327,25 @@ class Manager:
                             pending = None
                             next_refresh = now + backoff
                             self.wait(backoff)
-                            backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
+                            backoff = min(backoff * 2, self.settings.bootstrap_backoff_max_seconds)
                             continue
                         self.activate_and_configure(self.prepare(pending, providers), providers, pending)
                         providers.commit(pending)
                         pending = None
-                        backoff = self.settings['bootstrap_backoff_seconds']
+                        backoff = self.settings.bootstrap_backoff_seconds
                         if not reload_only:
-                            next_refresh = time.monotonic() + (self.settings['refresh_seconds'] if fetched else 0)
+                            next_refresh = time.monotonic() + (self.settings.refresh_seconds if fetched else 0)
                     except (Stopping, RecoveryFailed):
                         raise
                     except Exception as exc:
                         log('refresh_failed', error=type(exc).__name__)
                         if self.current is not None:
                             pending = None
-                            next_refresh = time.monotonic() + self.settings['refresh_seconds']
+                            next_refresh = time.monotonic() + self.settings.refresh_seconds
                         else:
                             # Retain fetched snapshots in memory: runtime retries do not refetch.
                             self.wait(backoff)
-                            backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
+                            backoff = min(backoff * 2, self.settings.bootstrap_backoff_max_seconds)
                 self.tick_scheduler()
                 self.wait(0.1)
         except Stopping:

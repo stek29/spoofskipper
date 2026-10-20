@@ -22,7 +22,7 @@ DEFAULT_PROBE_URL = 'https://speed.cloudflare.com/__down?bytes={bytes}'
 
 
 @dataclass(frozen=True)
-class Settings(Mapping):
+class Settings:
     refresh_seconds: float = 7200
     revision_timeout: float = 30
     shutdown_timeout: float = 10
@@ -62,21 +62,11 @@ class Settings(Mapping):
     def with_changes(self, **changes):
         return replace(self, **changes)
 
-    # Dynamic cadence lookup and existing public helper inputs use Mapping.
-    # The stored values and all nested collections remain immutable.
-    def __getitem__(self, key):
-        if key not in self.__dataclass_fields__:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def __iter__(self):
-        return iter(self.__dataclass_fields__)
-
-    def __len__(self):
-        return len(self.__dataclass_fields__)
+    def as_dict(self):
+        return {field.name: getattr(self, field.name) for field in fields(self)}
 
 
-NUMERIC_DEFAULTS = {field.name: field.default for field in fields(Settings)
+_NUMERIC_DEFAULTS = {field.name: field.default for field in fields(Settings)
                     if isinstance(field.default, (int, float)) and not isinstance(field.default, bool)}
 
 
@@ -107,7 +97,7 @@ def load_settings(config_dir):
     if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
             or not math.isfinite(w) or w <= 0 for w in weights.values()):
         raise ValueError('provider weights must be positive finite numbers')
-    for key, default in NUMERIC_DEFAULTS.items():
+    for key, default in _NUMERIC_DEFAULTS.items():
         value = settings.setdefault(key, default)
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
             raise ValueError('invalid manager deadline/cadence')

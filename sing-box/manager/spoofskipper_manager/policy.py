@@ -37,7 +37,7 @@ class EligiblePool:
     unresolved: tuple = ()
 
     def healthy(self, key):
-        return self.samples[key].is_healthy(self.now, self.settings['gate_standby_seconds'] * 2)
+        return self.samples[key].is_healthy(self.now, self.settings.gate_standby_seconds * 2)
 
     def unknown(self, key):
         return self.samples[key].health is not Health.FAILED and not self.healthy(key)
@@ -65,7 +65,7 @@ class EligiblePool:
 
 def eligible_pool(selector, current, candidates, samples, now, settings, members):
     """One tier and fresh-health gate for decisions and observational summaries."""
-    tiers = settings.get('selector_priorities', {}).get(selector)
+    tiers = settings.selector_priorities.get(selector)
     priorities = ({key: index for index, providers in enumerate(tiers)
                    for key, candidate in candidates.items() if candidate.provider in providers}
                   if tiers is not None else None)

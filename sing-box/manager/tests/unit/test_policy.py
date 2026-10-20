@@ -10,9 +10,10 @@ from spoofskipper_manager import clash_api, compiler
 from spoofskipper_manager.identity import Candidate, SampleKey
 from spoofskipper_manager.policy import Policy, score
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
-from spoofskipper_manager.probes import DEFAULTS, SKIP, THROTTLE, Probe, ProbeResult, sample_key
+from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult
+from spoofskipper_manager.identity import sample_key
 from spoofskipper_manager.service import load_settings
-from spoofskipper_manager.settings import CHALLENGE_RETRY_SECONDS, SCORE_MAX_AGE
+from spoofskipper_manager.settings import CHALLENGE_RETRY_SECONDS, SCORE_MAX_AGE, Settings
 from spoofskipper_manager.state import write_json
 
 
@@ -34,7 +35,7 @@ class PolicyTests(unittest.TestCase):
         return self.samples[key(tag)]
 
     def decide(self, tag='a', selector='proxy_main'):
-        return self.p.decide(selector, tag, self.candidates, self.samples, self.now, {**DEFAULTS, 'selector_priorities': {'proxy_deepmind': [['preferred'], ['chained']]}},
+        return self.p.decide(selector, tag, self.candidates, self.samples, self.now, Settings(selector_priorities={'proxy_deepmind': [['preferred'], ['chained']]}),
                              [m for m in self.members if selector != 'chained_upstream' or m != 'chained'])
 
     def test_score_tradeoff_cap_weight_median_and_freshness(self):

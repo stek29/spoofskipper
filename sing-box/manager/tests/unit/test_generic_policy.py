@@ -10,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler, clash_api
 from spoofskipper_manager.identity import Candidate, SampleKey
 from spoofskipper_manager.policy import Policy
-from spoofskipper_manager.probes import DEFAULTS, sample_key
+from spoofskipper_manager.identity import sample_key
+from spoofskipper_manager.settings import Settings
 from spoofskipper_manager.scheduler import Health, Scheduler, Sample
 from spoofskipper_manager.service import load_settings
 from spoofskipper_manager.state import write_json
@@ -21,7 +22,7 @@ class GenericPolicyTests(unittest.TestCase):
         candidates = {SampleKey(x, x): Candidate({}, x) for x in ('first', 'second', 'third')}
         samples = {k: Sample(health=Health.HEALTHY, healthy_at=1000, latency=20,
                             successes=[(1000, 1 if k[0] == 'first' else 50, 20)]) for k in candidates}
-        settings = {**DEFAULTS, 'selector_priorities': {'arbitrary': [['first'], ['second'], ['third']]}}
+        settings = Settings(selector_priorities={'arbitrary': [['first'], ['second'], ['third']]})
         policy = Policy()
         decide = lambda: policy.decide('arbitrary', 'third', candidates, samples, 1000, settings, ['first', 'second', 'third'])
         self.assertEqual(decide().reason, 'hold')
@@ -31,7 +32,7 @@ class GenericPolicyTests(unittest.TestCase):
         self.assertEqual(decide().reason, 'priority_health_unknown')
         samples[('first', 'first')].health = Health.FAILED
         self.assertEqual(decide().target, ('second', 'second'))
-        settings.pop('selector_priorities')
+        settings = settings.with_changes(selector_priorities={})
         self.assertEqual(decide().target, ('second', 'second'))
 
     def test_arbitrary_static_proxy_chain_and_dependency_invalidation(self):

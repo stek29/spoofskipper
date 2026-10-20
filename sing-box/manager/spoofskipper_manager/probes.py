@@ -10,11 +10,8 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from .identity import identity, sample_key  # noqa: F401 (sample_key is re-exported)
-from .settings import Settings, NUMERIC_DEFAULTS
-
-# Kept as a numeric defaults mapping for public measurement/test helpers.
-DEFAULTS = NUMERIC_DEFAULTS
+from .identity import identity
+from .settings import Settings
 
 # Throttling middleboxes let small responses through and stall the connection
 # after a few dozen KiB, so health is proven only past THROTTLE bytes.
@@ -90,7 +87,7 @@ class _Reader(io.RawIOBase):
 class _Connection(http.client.HTTPSConnection):
     """Only instrument I/O, deadlines and cancellation; http.client owns HTTP."""
     def __init__(self, client, deadline):
-        super().__init__('127.0.0.1', client.settings['probe_port'], timeout=1, context=client.context)
+        super().__init__('127.0.0.1', client.settings.probe_port, timeout=1, context=client.context)
         self.client, self.deadline = client, deadline
         self.first_byte, self.stall, self.io_socket = None, None, None
         self.response_class = lambda sock, **kw: http.client.HTTPResponse(_ResponseSocket(sock, self), **kw)
@@ -156,9 +153,7 @@ class ProbeClient:
         post_started = burst = None
         result = ProbeResult(probe)
         try:
-            target = urlsplit(self.settings.probe_url.replace('{bytes}', str(expected)))
-            if target.scheme != 'https' or not target.hostname or target.username or target.fragment:
-                raise ValueError('HTTPS endpoint required')
+            target = urlsplit(self.settings.probe_url.replace('{bytes}', str(expected)))  # Validated on load.
             connection = _Connection(self, started + self.settings.probe_timeout)
             user, password = identity(outbound)
             connection.set_tunnel(target.hostname, target.port or 443, headers={

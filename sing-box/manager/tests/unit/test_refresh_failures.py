@@ -10,7 +10,8 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api, compiler, service
 from spoofskipper_manager.settings import Settings
-from spoofskipper_manager.probes import THROTTLE, sample_key
+from spoofskipper_manager.probes import THROTTLE
+from spoofskipper_manager.identity import sample_key
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.state import write_json
 
@@ -32,7 +33,7 @@ class RefreshFailureTests(unittest.TestCase):
             candidates = [{'provider': 'p', 'weight': 1, 'outbound': o} for o in old['outbounds'][:2]]
             providers = Mock(snapshots={'p': {}}, candidates=Mock(return_value=candidates))
             providers.refresh.return_value = {'p': {}}
-            settings = dict(manager.settings)
+            settings = manager.settings.as_dict()
             if case not in ('commit', 'stage'):
                 settings['managed_selectors'] = []
             if case == 'disable':
@@ -61,7 +62,7 @@ class RefreshFailureTests(unittest.TestCase):
                     self.assertTrue(submit.called)
                     self.assertTrue(all(call.args[2] == expected for call in submit.call_args_list))
                 else:
-                    self.assertEqual(scheduler.settings['managed_selectors'], ())
+                    self.assertEqual(scheduler.settings.managed_selectors, ())
                     if case == 'disable':
                         self.assertIsNone(scheduler.client)
                         self.assertTrue(clients[0].cancelled.is_set())

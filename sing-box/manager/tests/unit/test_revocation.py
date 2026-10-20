@@ -16,7 +16,7 @@ class EvidenceTests(unittest.TestCase):
             scheduler.controller.policy.observe('proxy_main', 'a', 100)
             scheduler.controller.policy.pending['proxy_main'] = (SampleKey('b', 'hash'), 400)
             scheduler.restrict({'probes_enabled': True, 'managed_selectors': ['proxy_deepmind']})
-            self.assertEqual(scheduler.settings['managed_selectors'], ())
+            self.assertEqual(scheduler.settings.managed_selectors, ())
             self.assertNotIn('proxy_main', scheduler.controller.policy.choices)
             self.assertNotIn('proxy_main', scheduler.controller.policy.pending)
         finally:
