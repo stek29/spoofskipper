@@ -9,6 +9,9 @@ from types import MappingProxyType
 from urllib.parse import urlsplit
 
 ACTIVE_SCORE_MAX_AGE = 7200
+SCORE_MAX_AGE = 172800  # standby scores used for ranking
+CHALLENGE_RETRY_SECONDS = 1800  # retry of a failed or stale challenger test
+SHORTLIST_SIZE = 3  # standbys per provider that get throughput tests
 FRESH_SAMPLE_SECONDS = 30
 INSPECT_SECONDS = 5
 SCHEDULER_ERROR_LOG_SECONDS = 60
@@ -30,14 +33,12 @@ class Settings(Mapping):
     throttle_seconds: float = 300
     throughput_active_seconds: float = 3600
     throughput_shortlist_seconds: float = 21600
-    throughput_sweep_seconds: float = 172800
     probe_timeout: float = 15
     probe_stall_timeout: float = 2
     throughput_seconds: float = 4
     probe_workers: int = 4
     probe_port: int = 19090
     clash_api_port: int = 19089
-    early_test_seconds: float = 1800
     probes_enabled: bool = False
     managed_selectors: tuple[str, ...] = ()
     provider_weights: Mapping[str, float] = field(default_factory=dict)

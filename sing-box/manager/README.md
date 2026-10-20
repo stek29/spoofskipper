@@ -44,15 +44,13 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `gate_standby_seconds` | 480 | Standby-path gate interval |
 | `throttle_seconds` | 300 | Active-path threshold check interval |
 | `throughput_active_seconds` | 3600 | Active throughput interval |
-| `throughput_shortlist_seconds` | 21600 | Shortlisted standby throughput interval |
-| `throughput_sweep_seconds` | 172800 | Remaining standby throughput interval and ranking age |
-| `early_test_seconds` | 1800 | Early shortlist/challenge retry interval |
+| `throughput_shortlist_seconds` | 21600 | Throughput interval for the 3 lowest-latency healthy standbys per provider |
 | `probe_workers` | 4 | Concurrent gates, integer 1–4; body checks/downloads are serial |
 | `probe_port` | 19090 | Loopback mixed inbound port, integer 1–65535 |
 | `clash_api_port` | 19089 | Loopback Clash API port added when the config has no `external_controller` |
 | `probe_timeout` | 15 | Overall probe deadline, maximum 15 |
 | `probe_stall_timeout` | 2 | Body stall deadline |
-| `throughput_seconds` | 4 | Throughput duration, maximum 4 |
+| `throughput_seconds` | 4 | Throughput body time box after headers, maximum 4 |
 | `probe_url` | `https://speed.cloudflare.com/__down?bytes={bytes}` | Verified HTTPS endpoint with a `{bytes}` placeholder |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
@@ -89,23 +87,36 @@ failed. A failed path that answers a gate gets one `throttle` re-check per gate.
 
 A higher tier must be failed before a lower tier is eligible. Unknown health
 requests gates first. Failure of the active path bypasses the hold and score
-margin, but switches only to a path that answered after the failure; if the probe
+margin, but the best-ranked replacement must first pass a `throttle` check taken
+after the failure; if it fails too, the next one is checked. If the probe
 endpoint itself is down, no path qualifies and the current route is kept.
 All-path failure keeps the current route and never adds direct routing.
 
 The five-minute elective hold and 15% improvement margin are fixed policy rules,
 not configurable cadences. Scores use the last three successful throughput/latency
 samples, capped at 50 Mbps and weighted by provider. Active scores expire after
-two hours. Every elective switch, including a return to a higher tier (which skips
-the margin), requires a `throughput` result taken after the hold and no older than
-30 seconds. A failed or stale challenge is retried at `early_test_seconds`.
-Attempts cancelled by a reload or selector write can be retried immediately;
-upstream-change and worker-error discards retain their normal scheduling timestamps.
+two hours, standby scores after two days. Every elective switch, including a
+return to a higher tier (which skips the margin), requires a `throughput` result
+taken after the hold and no older than 30 seconds. A failed or stale challenge is
+retried after 30 minutes. Attempts cancelled by a reload or selector write can be
+retried immediately; upstream-change and worker-error discards retain their
+normal scheduling timestamps.
 
-Throughput skips 512 KiB and stops at four seconds, 4 MiB scored, or sufficient
-evidence above 50 Mbps. Insufficient evidence means unknown performance; after two
-unknown results, early shortlist downloads back off to the sweep cadence. Native
-URLTest checks remain independently active.
+Throughput runs only on active paths and on the three lowest-latency healthy
+standbys of each provider. It skips 512 KiB, then reads for at most four seconds
+after the response headers, stopping early at 4 MiB scored or sufficient
+evidence above 50 Mbps. Native URLTest checks remain independently active.
+
+Approximate probe traffic with default cadences, for fast paths:
+
+| Source | Volume |
+|---|---|
+| Each active path | about 180 MiB/day (throttle every 5 min, throughput hourly) |
+| Each provider's 3 shortlisted standbys | up to about 54 MiB/day together |
+| Gates | a TLS handshake each: every minute (active) or 8 minutes (standby) |
+| Failed paths that still answer gates | one `throttle` attempt per gate; throttled paths usually stall within tens of KiB |
+
+Slow paths read less, because throughput is time-boxed.
 
 ## Enable and disable
 

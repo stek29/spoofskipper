@@ -4,7 +4,7 @@ from .clash_api import resolve
 from .compiler import selectors
 from .policy import Policy, score
 from .probes import Probe
-from .settings import ACTIVE_SCORE_MAX_AGE
+from .settings import ACTIVE_SCORE_MAX_AGE, CHALLENGE_RETRY_SECONDS, SCORE_MAX_AGE
 
 
 class SelectorController:
@@ -46,7 +46,7 @@ class SelectorController:
                 last = measurements.samples[key].last.get(probe, float('-inf'))
                 # Run each requested test once per decision; retry failed or
                 # unknown results at the normal cadence rather than every tick.
-                interval = measurements.settings['gate_active_seconds' if probe is Probe.GATE else 'early_test_seconds']
+                interval = measurements.settings.gate_active_seconds if probe is Probe.GATE else CHALLENGE_RETRY_SECONDS
                 if last < decision.since or now-last >= interval:
                     measurements.requested.setdefault(key, probe)
             target = decision.target
@@ -57,7 +57,7 @@ class SelectorController:
                 if key:
                     sample = measurements.samples[key]
                     compared.append({'candidate': tag, 'score': score(sample, measurements.candidates[key].weight, now,
-                        ACTIVE_SCORE_MAX_AGE if tag == measurements.active[selector] else measurements.settings['throughput_sweep_seconds']),
+                        ACTIVE_SCORE_MAX_AGE if tag == measurements.active[selector] else SCORE_MAX_AGE),
                         'sample_age': now-sample.throughput_at if sample.successes else None})
             signature = (decision.reason, target, pending)
             if self.last_decisions.get(selector) != signature:

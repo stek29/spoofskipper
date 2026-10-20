@@ -5,7 +5,7 @@ import math
 
 from .probes import Probe
 from .samples import Health
-from .settings import HOLD, MARGIN, ACTIVE_SCORE_MAX_AGE, FRESH_SAMPLE_SECONDS
+from .settings import HOLD, MARGIN, ACTIVE_SCORE_MAX_AGE, FRESH_SAMPLE_SECONDS, SCORE_MAX_AGE
 
 
 def score(sample, weight, now, max_age):
@@ -51,12 +51,12 @@ class EligiblePool:
 
     def value(self, key, max_age=None):
         if max_age is None:
-            max_age = self.settings['throughput_sweep_seconds']
+            max_age = SCORE_MAX_AGE
         return score(self.samples[key], self.candidates[key].weight, self.now, max_age)
 
     def rank(self, key, max_age=None):
         if max_age is None:
-            max_age = self.settings['throughput_sweep_seconds']
+            max_age = SCORE_MAX_AGE
         if key == self.active and math.isfinite(max_age):
             max_age = ACTIVE_SCORE_MAX_AGE
         value = self.value(key, max_age)
@@ -120,16 +120,16 @@ class Policy:
             unresolved = any(pool.unknown(key) for key in pool.members)
             return Decision(None, 'health_unknown' if unresolved else 'all_paths_failed',
                             pool.gate_tests(pool.members))
-        # Switch only to a path that answered after the active one failed. When
-        # the probe endpoint itself is down, every path fails this check and the
-        # current route is kept instead of hopping between paths.
+        # Switch only to a path that read past the throttling threshold after
+        # the active one failed: a standby's earlier proof may be hours old, and
+        # a tiny gate response passes throttling middleboxes. Candidates are
+        # checked best first. When the probe endpoint itself is down, none
+        # qualifies and the current route is kept instead of hopping between paths.
         since = pool.samples[pool.active].failed_at if failed else float('-inf')
-        verified = tuple(key for key in pool.available if pool.samples[key].healthy_at >= since)
-        if not verified:
-            return Decision(None, 'failover_verify',
-                            tuple((key, Probe.GATE) for key in pool.available), since)
-        target = max(verified, key=lambda key: pool.rank(key, float('inf')))
-        return Decision(target, 'health_failover' if failed else 'healthy_bootstrap')
+        best = max(pool.available, key=lambda key: pool.rank(key, float('inf')))
+        if pool.samples[best].threshold_at < since:
+            return Decision(None, 'failover_verify', ((best, Probe.THROTTLE),), since)
+        return Decision(best, 'health_failover' if failed else 'healthy_bootstrap')
 
     def elective(self, selector, pool):
         """Switch a working route only for a fresh, clearly better measurement."""

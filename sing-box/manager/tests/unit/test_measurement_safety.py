@@ -28,36 +28,6 @@ class MeasurementSafetyTests(unittest.TestCase):
     def tearDown(self):
         self.scheduler.close()
 
-    def test_path_without_latency_can_be_ranked_and_scheduled(self):
-        scheduler = self.scheduler
-        for key in self.keys[:3]:
-            scheduler.accept(key, ProbeResult(Probe.GATE, ok=True, latency_ms=50, bytes=1), 1000)
-            scheduler.accept(key, ProbeResult(Probe.THROUGHPUT, ok=True, latency_ms=50,
-                             mbps=20, bytes=5000000), 1000)
-        key = self.keys[3]
-        scheduler.accept(key, ProbeResult(Probe.THROTTLE, ok=True, bytes=THROTTLE), 1000)
-        scheduler.samples[key].last['gate'] = 1000
-        self.assertTrue(scheduler.samples[key].healthy)
-        self.assertIsNone(scheduler.samples[key].latency)
-        peers = scheduler.shortlist(1001)['prov']
-        self.assertEqual(len(peers), 3)
-        scheduler.next_test(key, peers, 1001)
-        scheduler.last_inspect = 1000
-        from concurrent.futures import Future
-        with patch.object(scheduler.pool, 'submit', side_effect=lambda *args: Future()):
-            scheduler.tick()
-
-    def test_two_unknown_throughput_results_use_sweep_cadence(self):
-        scheduler, key = self.scheduler, self.keys[0]
-        sample = scheduler.samples[key]
-        sample.health, sample.healthy_at = Health.HEALTHY, 1000
-        for at in (1000, 2800):
-            scheduler.accept(key, ProbeResult(Probe.THROUGHPUT, ok=True, bytes=1, latency_ms=10), at)
-        sample.last.update(gate=4600, throughput=2800)
-        self.assertIsNone(scheduler.next_test(key, [], 4600))
-        sample.last['gate'] = 2800 + scheduler.settings['throughput_sweep_seconds']
-        self.assertEqual(scheduler.next_test(key, [], sample.last['gate']), 'throughput')
-
     def test_tick_exception_is_logged_and_manager_keeps_running(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

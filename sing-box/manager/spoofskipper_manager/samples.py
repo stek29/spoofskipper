@@ -18,13 +18,13 @@ class Health(Enum):
 class Sample:
     latency: float | None = None
     health: Health = Health.UNKNOWN
-    healthy_at: float = float('-inf')  # last success while healthy
+    healthy_at: float = float('-inf')  # last success while healthy (gates keep it fresh)
+    threshold_at: float = float('-inf')  # last read past the throttling threshold
     failed_at: float = float('-inf')   # when the path last became failed
     reachable_at: float = float('-inf')  # last gate success, healthy or not
     failures: int = 0
     failed_probe: Probe | None = None  # kind of the latest failure
     confirm: Probe | None = None  # repeat this probe now to confirm a failure
-    unknown_throughput: int = 0
     successes: list[tuple[float, float, float]] = field(default_factory=list)  # (at, mbps, latency)
     last: dict[Probe, float] = field(default_factory=dict)  # submission times
 
@@ -52,8 +52,6 @@ class Sample:
         probe = result.probe
         if result.latency_ms is not None:
             self.latency = result.latency_ms
-        if probe is Probe.THROUGHPUT:
-            self.unknown_throughput = 0 if result.mbps is not None else self.unknown_throughput + 1
         if not result.ok:
             self.failures, self.failed_probe = self.failures + 1, probe
             if self.failures < FAILURES_TO_FAIL:
@@ -73,6 +71,6 @@ class Sample:
             return
         if not result.passed_threshold:
             return  # Slow but alive within the time box: no new evidence.
-        self.failures, self.health, self.healthy_at = 0, Health.HEALTHY, now
+        self.failures, self.health, self.healthy_at, self.threshold_at = 0, Health.HEALTHY, now, now
         if result.mbps is not None:
             self.successes = (self.successes + [(now, result.mbps, self.latency)])[-3:]

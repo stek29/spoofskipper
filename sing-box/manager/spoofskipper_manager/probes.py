@@ -150,7 +150,6 @@ class ProbeClient:
     def run(self, outbound, probe):
         probe = Probe(probe)
         started = self.clock()
-        duration = self.settings.throughput_seconds if probe is Probe.THROUGHPUT else self.settings.probe_timeout
         expected = probe.budget
         connection = response = None
         body = 0
@@ -160,7 +159,7 @@ class ProbeClient:
             target = urlsplit(self.settings.probe_url.replace('{bytes}', str(expected)))
             if target.scheme != 'https' or not target.hostname or target.username or target.fragment:
                 raise ValueError('HTTPS endpoint required')
-            connection = _Connection(self, started + duration)
+            connection = _Connection(self, started + self.settings.probe_timeout)
             user, password = identity(outbound)
             connection.set_tunnel(target.hostname, target.port or 443, headers={
                 'Proxy-Authorization': 'Basic ' + base64.b64encode(f'{user}:{password}'.encode()).decode()})
@@ -171,6 +170,9 @@ class ProbeClient:
             response = connection.getresponse()
             result.status = response.status
             validate_response(response, expected)
+            if probe is Probe.THROUGHPUT:
+                # Time-box only the body: slow setup must not cost the measurement.
+                connection.deadline = self.clock() + self.settings.throughput_seconds
             connection.stall = self.settings.probe_stall_timeout
             while body < expected:
                 try:

@@ -84,27 +84,20 @@ class SchedulingTests(unittest.TestCase):
         self.scheduler.tick()
         self.assertTrue(any(e == 'probe_discarded' for e, _ in self.logs))
 
-    def test_shortlist_warmup_backfill_and_freshness(self):
-        for i, (key, sample) in enumerate(self.scheduler.samples.items()):
+    def test_only_the_lowest_latency_standbys_get_throughput_tests(self):
+        for i, sample in enumerate(self.scheduler.samples.values()):
             sample.health, sample.latency = Health.HEALTHY, 10+i
             sample.last['gate'] = self.now
-            if i < 3:
-                sample.successes = [(self.now, 20, 10+i)]
-        peers = self.scheduler.shortlist(self.now)['p']
-        self.assertEqual(len(peers), 3)
+        shortlisted = self.scheduler.shortlist()
+        self.assertEqual(sorted(k.tag for k in shortlisted), ['c0', 'c1', 'c2'])
         self.scheduler.tick()
-        self.assertEqual(len(self.scheduler.jobs), 0)  # no full-pool startup downloads
-        self.scheduler.samples[peers[0]].health = Health.FAILED
-        self.scheduler.samples[peers[0]].last['throttle'] = self.now
-        self.scheduler.tick()
-        self.assertEqual(len(self.scheduler.jobs), 1)  # latency-ranked replacement
+        self.assertEqual(len(self.scheduler.jobs), 1)  # Downloads run one at a time.
         key, kind, _ = next(iter(self.scheduler.jobs.values()))
-        self.assertEqual(kind, 'throughput')
-        self.assertNotIn(key, peers)
+        self.assertEqual((key.tag, kind), ('c0', 'throughput'))
         self.complete(mbps=20)
-        sample = self.scheduler.samples[peers[1]]
-        self.assertIsNotNone(score(sample, 1, self.now, 7200))
-        self.assertIsNone(score(sample, 1, self.now+7201, 7200))
+        self.scheduler.samples[key].health = Health.FAILED  # A failed path drops out; c3 moves up.
+        self.assertIn('c3', {k.tag for k in self.scheduler.shortlist()})
+        self.assertIsNone(self.scheduler.next_test(sample_key({'type': 'trojan', 'tag': 'c5'}), shortlisted, self.now))
 
     def test_failure_confirmation_is_scheduled_first_and_survives_cancellation(self):
         key = next(iter(self.scheduler.samples))

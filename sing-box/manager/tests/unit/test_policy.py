@@ -12,6 +12,7 @@ from spoofskipper_manager.policy import Policy, score
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.probes import DEFAULTS, SKIP, THROTTLE, Probe, ProbeResult, sample_key
 from spoofskipper_manager.service import load_settings
+from spoofskipper_manager.settings import CHALLENGE_RETRY_SECONDS, SCORE_MAX_AGE
 from spoofskipper_manager.state import write_json
 
 
@@ -46,7 +47,7 @@ class PolicyTests(unittest.TestCase):
         s.successes = [(1000, 50, 50)]
         self.assertEqual(score(s, 1, 1000, 7200), capped)
         self.assertIsNone(score(s, 1, 8201, 7200))
-        self.assertIsNotNone(score(s, 1, 8201, DEFAULTS['throughput_sweep_seconds']))
+        self.assertIsNotNone(score(s, 1, 8201, SCORE_MAX_AGE))
         s.health = Health.FAILED
         self.assertIsNone(score(s, 1, 1000, 7200))
 
@@ -97,18 +98,21 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.decide().reason, 'all_paths_failed')
         self.assertIsNone(self.decide().target)
 
-    def test_failover_waits_for_a_path_that_answered_after_the_failure(self):
+    def test_failover_needs_a_threshold_pass_after_the_failure(self):
         self.sample('a').health, self.sample('a').failed_at = Health.FAILED, 1000
+        self.sample('b').successes = [(1000, 40, 50)]  # Best ranked, then c.
+        self.sample('c').successes = [(1000, 20, 50)]
         for tag in ('b', 'c', 'chained'):
-            self.sample(tag).healthy_at = 999
+            self.sample(tag).healthy_at = 1001  # Gates answered after the failure...
+            self.sample(tag).threshold_at = 900  # ...but the threshold was last passed before it.
         self.now = 1001
         d = self.decide()
         self.assertIsNone(d.target)
         self.assertEqual(d.reason, 'failover_verify')
-        self.assertEqual(d.since, 1000)
-        self.assertEqual({probe for _, probe in d.tests}, {Probe.GATE})
-        self.assertEqual({k.tag for k, _ in d.tests}, {'b', 'c', 'chained'})
-        self.sample('c').healthy_at = 1001  # Endpoint down for the others: only c answered.
+        self.assertEqual((d.tests, d.since), (((key('b'), Probe.THROTTLE),), 1000))
+        self.sample('b').health = Health.FAILED  # b stalls too; the next best is checked.
+        self.assertEqual(self.decide().tests, ((key('c'), Probe.THROTTLE),))
+        self.sample('c').threshold_at = 1002
         self.assertEqual(self.decide().target, key('c'))
 
     def test_preferred_unknown_before_chained_and_strict_boundary(self):
@@ -327,7 +331,7 @@ class PolicySchedulingTests(unittest.TestCase):
         sample = self.scheduler.samples[key]
         sample.successes = [(1301, 40, 50)]
         sample.last.update(throughput=1301)
-        for now, requested in ((1400, False), (1301 + self.scheduler.settings['early_test_seconds'], True)):
+        for now, requested in ((1400, False), (1301 + CHALLENGE_RETRY_SECONDS, True)):
             self.now = now
             for other in self.scheduler.samples.values():
                 other.healthy_at = self.now

@@ -30,7 +30,7 @@ class DiscardCadenceTests(unittest.TestCase):
                 scheduler.controller.inspect()
             for sample in scheduler.samples.values():
                 sample.health, sample.healthy_at, sample.latency = Health.HEALTHY, now[0], 10
-                sample.last.update(gate=now[0], throttle=now[0], throughput=now[0]-1800)
+                sample.last.update(gate=now[0], throttle=now[0], throughput=now[0]-scheduler.settings.throughput_shortlist_seconds)
         choices = itertools.cycle(('up', 'up2'))
         def proxies(*args, **kwargs):
             if api_down:

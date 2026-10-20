@@ -9,7 +9,7 @@ from .graph import OutboundGraph
 from .identity import Candidate, sample_key
 from .probes import Probe, ProbeClient
 from .samples import Health, Sample
-from .settings import Settings, INSPECT_SECONDS
+from .settings import Settings, INSPECT_SECONDS, SHORTLIST_SIZE
 
 
 def path_identity(config, proxies, tag):
@@ -22,7 +22,6 @@ class Scheduler:
         self.pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix='probe')
         self.samples, self.candidates, self.jobs = {}, {}, {}
         self.epoch, self.config, self.settings = 0, None, Settings()
-        self.started = clock()
         self.paths, self.path_versions, self.proxy_choices = {}, {}, {}
         self.active, self.last_inspect = {}, float('-inf')
         self.client = None
@@ -119,13 +118,14 @@ class Scheduler:
             client.cancel()
         self.pool.shutdown(wait=True, cancel_futures=True)
 
-    def shortlist(self, now):
+    def shortlist(self):
+        """The lowest-latency healthy standbys of each provider get throughput tests."""
         groups = {}
         for key, candidate in self.candidates.items():
-            sample = self.samples[key]
-            if sample.scored(now, self.settings['throughput_sweep_seconds']):
+            if self.samples[key].health is Health.HEALTHY:
                 groups.setdefault(candidate.provider, []).append(key)
-        return {p: sorted(keys, key=lambda k: self.samples[k].latency_or_inf)[:3] for p, keys in groups.items()}
+        return {key for keys in groups.values()
+                for key in sorted(keys, key=lambda k: self.samples[k].latency_or_inf)[:SHORTLIST_SIZE]}
 
     def perform(self, client, config, candidate, probe):
         outbound = candidate.outbound
@@ -174,7 +174,7 @@ class Scheduler:
             except Exception as exc:
                 self.log('probe_discarded', candidate=key.tag, reason=type(exc).__name__)
 
-    def next_test(self, key, peers, now):
+    def next_test(self, key, shortlisted, now):
         sample, settings = self.samples[key], self.settings
         last = lambda probe: sample.last.get(probe, float('-inf'))
         active = key.tag in self.active.values()
@@ -187,15 +187,10 @@ class Scheduler:
             return Probe.THROTTLE if sample.reachable_at > last(Probe.THROTTLE) else None
         if active and now >= last(Probe.THROTTLE) + settings['throttle_seconds']:
             return Probe.THROTTLE
-        cadence = settings['throughput_active_seconds' if active else
-                           'throughput_shortlist_seconds' if key in peers else 'throughput_sweep_seconds']
-        # Spread first sweeps across the interval; shortlist bootstrap bypasses this.
-        first_sweep = self.started + cadence * int(key.digest[:8], 16) / 0xffffffff
-        due = last(Probe.THROUGHPUT) + cadence if Probe.THROUGHPUT in sample.last else first_sweep
-        early = (sample.unknown_throughput < 2 and key not in peers and
-                 (len(peers) < 3 or sample.latency_or_inf < max(self.samples[k].latency_or_inf for k in peers)))
-        if now >= due or (early and now-last(Probe.THROUGHPUT) >= settings['early_test_seconds']):
-            return Probe.THROUGHPUT
+        if active or key in shortlisted:
+            cadence = settings['throughput_active_seconds' if active else 'throughput_shortlist_seconds']
+            if now >= last(Probe.THROUGHPUT) + cadence:
+                return Probe.THROUGHPUT
         return None
 
     def tick(self):
@@ -214,14 +209,14 @@ class Scheduler:
         gates = sum(probe is Probe.GATE for _, probe, _ in self.jobs.values())
         # Gates run in parallel; body probes download one at a time.
         downloading = any(probe is not Probe.GATE for _, probe, _ in self.jobs.values())
-        shortlists = self.shortlist(now)
+        shortlisted = self.shortlist()
         ordered = sorted(self.candidates, key=lambda k: (k not in self.requested, k.tag not in self.active.values(),
                                                          self.samples[k].latency_or_inf, k))
         for key in ordered:
             if key in busy:
                 continue
             candidate, sample = self.candidates[key], self.samples[key]
-            probe = self.requested.get(key) or self.next_test(key, shortlists.get(candidate.provider, []), now)
+            probe = self.requested.get(key) or self.next_test(key, shortlisted, now)
             if probe is None:
                 continue
             if probe is Probe.GATE:
