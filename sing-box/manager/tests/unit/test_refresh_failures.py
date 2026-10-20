@@ -113,5 +113,3 @@ class RefreshFailureTests(unittest.TestCase):
 
     def test_failed_staging_write_keeps_probes_on_running_core(self):
         self.exercise('stage')
-
-

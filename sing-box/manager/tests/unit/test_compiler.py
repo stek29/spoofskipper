@@ -130,6 +130,43 @@ class CompilerTests(unittest.TestCase):
             self.assertTrue(m.marker.exists())
             self.assertEqual(json.loads(m.live.read_text()), old)
 
+    def test_rollback_recreates_probes_once_with_only_retained_ownership(self):
+        from unittest.mock import Mock
+        from spoofskipper_manager.service import ActivationRolledBack
+        with tempfile.TemporaryDirectory() as temp:
+            manager = Manager(temp, Path(temp) / 'state')
+            old = config()
+            old['outbounds'] = [{'type': 'trojan', 'tag': 'a'},
+                {'type': 'selector', 'tag': 'retained', 'outbounds': ['a']},
+                {'type': 'selector', 'tag': 'revoked', 'outbounds': ['a']},
+                {'type': 'direct', 'tag': compiler.REVISION_PREFIX+'old'}]
+            new = copy.deepcopy(old)
+            new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX+'new'
+            manager.current, manager.child = old, Mock()
+            write_json(manager.live, old)
+            candidates = [{'provider': 'p', 'weight': 1, 'outbound': old['outbounds'][0]}]
+            manager.scheduler.configure(old, candidates, {
+                'probes_enabled': True, 'managed_selectors': ['retained', 'revoked']})
+            previous_client = manager.scheduler.client
+            manager.settings = manager.settings.with_changes(probes_enabled=True, managed_selectors=['retained'])
+            try:
+                with patch.object(compiler, 'check'), patch.object(manager, 'alive', return_value=True), \
+                     patch.object(manager, 'verify', side_effect=[False, True]), \
+                     patch.object(manager, 'start'), patch.object(manager, 'stop_child'), \
+                     patch.object(clash_api, 'proxies', return_value={'retained': {'now': 'a'}}), \
+                     patch.object(clash_api, 'select') as select, \
+                     patch.object(manager.scheduler, 'configure', wraps=manager.scheduler.configure) as configure:
+                    with self.assertRaises(ActivationRolledBack):
+                        manager.activate_and_configure(new, Mock(), {})
+                configure.assert_called_once()
+                self.assertEqual(manager.scheduler.config, old)
+                self.assertEqual(manager.scheduler.settings.managed_selectors, ('retained',))
+                self.assertTrue(previous_client.cancelled.is_set())
+                self.assertFalse(manager.scheduler.client.cancelled.is_set())
+                self.assertTrue(all(call.args[1] == 'retained' for call in select.call_args_list))
+            finally:
+                manager.scheduler.close()
+
     def test_term_interrupts_pending_fetch(self):
         import signal
         from spoofskipper_manager.service import Stopping

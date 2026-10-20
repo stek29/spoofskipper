@@ -64,5 +64,3 @@ class EvidenceTests(unittest.TestCase):
             self.assertNotIn('proxy_main', scheduler.controller.policy.pending)
         finally:
             scheduler.close()
-
-

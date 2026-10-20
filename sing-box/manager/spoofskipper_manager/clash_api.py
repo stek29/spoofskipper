@@ -79,5 +79,3 @@ def resolve(proxies, tag):
         seen.add(tag)
         tag = proxies[tag]['now']
     return tag
-
-

@@ -296,4 +296,3 @@ class Scheduler:
                 sample.corroborate = None
             future = self.pool.submit(self.perform, self.client, self.config, candidate, kind)
             self.jobs[future] = (key, kind, self.epoch)
-
