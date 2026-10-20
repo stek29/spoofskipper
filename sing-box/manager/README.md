@@ -75,7 +75,9 @@ two hours. Elective switches require a new post-hold challenger measurement.
 Return from a working lower tier requires post-hold throughput and throttle
 checks no more than `30 + probe_timeout` seconds apart, with the throttle
 completed within 30 seconds of the decision. An expired pair starts a new
-challenge immediately; discarded attempts can be retried immediately.
+challenge immediately. Attempts cancelled by a reload or selector write can
+be retried immediately; upstream-change and worker-error discards retain their
+normal scheduling timestamps.
 
 Three failed gates request backup HEAD. Body failures require body evidence;
 HEAD/tiny successes cannot clear them. Throughput skips 512 KiB and stops at four

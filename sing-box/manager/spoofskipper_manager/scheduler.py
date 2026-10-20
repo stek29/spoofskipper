@@ -179,7 +179,7 @@ class Scheduler:
             except Exception:
                 pass
         for key, kind, _ in self.jobs.values():
-            self.discard_attempt(key, kind)
+            self.rearm_cancelled(key, kind)
         self.jobs.clear()
 
     def restart_client(self):
@@ -221,7 +221,8 @@ class Scheduler:
                      bytes=result['bytes'], burst_seconds=result.get('burst_seconds'))
         self.log('probe_sample', candidate=key[0], **result)
 
-    def discard_attempt(self, key, kind):
+    def rearm_cancelled(self, key, kind):
+        """Cancellation did not complete an attempt; permit its replacement now."""
         if key in self.samples:
             self.samples[key].last.pop(kind, None)
             if kind.startswith('corroborate'):
@@ -232,16 +233,19 @@ class Scheduler:
             if not future.done():
                 continue
             del self.jobs[future]
+            if epoch != self.epoch:
+                self.rearm_cancelled(key, kind)
+                self.log('probe_discarded', candidate=key[0], reason='reload_or_upstream_change')
+                continue
+            # Ordinary discards consumed an attempt: retain its submission cadence.
             try:
                 result, valid = future.result()
-                if epoch == self.epoch and key in self.samples and valid:
+                if key in self.samples and valid:
                     self.accept(key, kind, result, result.pop('completed_at', now))
                     self.samples[key].last[kind] = now  # Never catch up missed runs.
                 else:
-                    self.discard_attempt(key, kind)
                     self.log('probe_discarded', candidate=key[0], reason='reload_or_upstream_change')
             except Exception as exc:
-                self.discard_attempt(key, kind)
                 self.log('probe_discarded', candidate=key[0], reason=type(exc).__name__)
 
     def next_test(self, key, peers, now):

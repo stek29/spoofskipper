@@ -386,8 +386,8 @@ class PolicySchedulingTests(unittest.TestCase):
         self.assertEqual(policy.pending['proxy_deepmind'][1], self.now)
         self.write.assert_not_called()
 
-    def test_discarded_or_cancelled_priority_throttle_is_requested_immediately(self):
-        for discard in ('path_change', 'reload', 'worker_error'):
+    def test_cancelled_priority_throttle_is_requested_immediately(self):
+        for discard in ('epoch_change', 'reload'):
             with self.subTest(discard=discard):
                 # Start each challenge after the hold, with fresh throughput.
                 self.scheduler.invalidate()
@@ -409,10 +409,9 @@ class PolicySchedulingTests(unittest.TestCase):
                 if discard == 'reload':
                     self.scheduler.invalidate()
                     self.scheduler.restart_client()
-                elif discard == 'worker_error':
-                    future.set_exception(OSError('discarded worker'))
                 else:
-                    future.set_result(({'ok': True}, False))
+                    self.scheduler.epoch += 1
+                    future.set_exception(OSError('old epoch worker'))
                 self.now += .1
                 self.scheduler.tick()
                 self.assertEqual(self.api['proxy_deepmind']['now'], 'chained')
