@@ -13,7 +13,7 @@ FAILURES_TO_FAIL = 2
 class Health(Enum):
     UNKNOWN = 'unknown'
     HEALTHY = 'healthy'  # passed the throttling threshold and is still reachable
-    FAILED = 'failed'    # failed twice in a row
+    FAILED = 'failed'    # failed against every endpoint in a row
 
 
 @dataclass
