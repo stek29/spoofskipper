@@ -4,8 +4,9 @@ from enum import Enum
 
 from .probes import Probe
 
-# A failure is confirmed by an immediate repeat of the same probe kind against
-# the next probe endpoint, so one endpoint's outage does not fail every path.
+# A failure is confirmed by immediate repeats of the same probe kind against
+# the next probe endpoints, so one endpoint's outage does not fail every path.
+# A path fails once every endpoint failed in a row (twice with a single one).
 FAILURES_TO_FAIL = 2
 
 
@@ -49,7 +50,7 @@ class Sample:
             return []
         return [(rate, latency) for at, rate, latency in self.successes if 0 <= now-at <= max_age]
 
-    def record(self, result, now):
+    def record(self, result, now, failures_to_fail=FAILURES_TO_FAIL):
         probe = result.probe
         # Fallback endpoints prove health only; latency and rate stay comparable.
         primary = result.endpoint == 0
@@ -57,7 +58,7 @@ class Sample:
             self.latency = result.latency_ms
         if not result.ok:
             self.failures, self.failed_probe = self.failures + 1, probe
-            if self.failures < FAILURES_TO_FAIL:
+            if self.failures < failures_to_fail:
                 self.confirm = probe
             elif self.health is not Health.FAILED:
                 self.health, self.failed_at = Health.FAILED, now

@@ -51,7 +51,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_timeout` | 15 | Overall probe deadline, maximum 15 |
 | `probe_stall_timeout` | 2 | Body stall deadline |
 | `throughput_seconds` | 4 | Throughput body time box after headers, maximum 4 |
-| `probe_urls` | Cloudflare `__down`, then `https://proof.ovh.net/files/100Mb.dat` | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
+| `probe_urls` | Cloudflare `__down`, then OVH and Hetzner 100 MiB files | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch.
@@ -84,9 +84,10 @@ one must be a static file of at least 16 MiB, read with a `Range` request.
 A path is healthy only after a `throttle` or `throughput` probe reads past 256 KiB.
 Gates keep proven health fresh but cannot make an unknown or failed path healthy,
 because throttling middleboxes pass small responses and stall larger ones. A
-failed probe is repeated immediately against the next endpoint in `probe_urls`;
-two failures in a row mark the path failed, so an outage or block of one
-endpoint does not fail working paths. Only the first endpoint's latency and
+failed probe is repeated immediately against each next endpoint in `probe_urls`;
+the path is failed once every endpoint failed in a row (two attempts with a
+single endpoint), so an outage or block of one endpoint does not fail working
+paths. Only the first endpoint's latency and
 throughput are scored, keeping scores comparable; while it is unreachable,
 paths stay healthy through the fallback but their scores age out. A failed path that answers a gate gets one `throttle` re-check per gate.
 

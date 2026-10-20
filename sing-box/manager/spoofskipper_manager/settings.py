@@ -18,10 +18,11 @@ SCHEDULER_ERROR_LOG_SECONDS = 60
 # Policy invariants, deliberately fixed rather than operator-tunable cadences.
 HOLD = 300
 MARGIN = 1.15
-# Probes use the first endpoint; a failure is confirmed against the next one.
+# Probes use the first endpoint; a failure is confirmed against each next one.
 # URLs without {bytes} serve a large static file read with a Range request.
 DEFAULT_PROBE_URLS = ('https://speed.cloudflare.com/__down?bytes={bytes}',
-                      'https://proof.ovh.net/files/100Mb.dat')
+                      'https://proof.ovh.net/files/100Mb.dat',
+                      'https://nbg1-speed.hetzner.com/100MB.bin')
 
 
 @dataclass(frozen=True)

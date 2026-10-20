@@ -7,7 +7,7 @@ from .compiler import probe_outbounds
 from .graph import OutboundGraph
 from .identity import Candidate, sample_key
 from .probes import Probe, ProbeClient
-from .samples import Health, Sample
+from .samples import FAILURES_TO_FAIL, Health, Sample
 from .settings import Settings, INSPECT_SECONDS, SHORTLIST_SIZE
 
 
@@ -131,7 +131,7 @@ class Scheduler:
         return result
 
     def accept(self, key, result, now):
-        self.samples[key].record(result, now)
+        self.samples[key].record(result, now, max(FAILURES_TO_FAIL, len(self.settings.probe_urls)))
         if not result.ok:
             self.log('probe_failed', candidate=key.tag, probe=result.probe, error=result.error,
                      bytes=result.bytes, burst_seconds=result.burst_seconds)

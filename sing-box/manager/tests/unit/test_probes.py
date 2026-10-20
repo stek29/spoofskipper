@@ -114,6 +114,8 @@ class SchedulingTests(unittest.TestCase):
         self.scheduler.invalidate()  # A reload cancels the confirmation; it is re-armed.
         self.assertEqual(sample.confirm, Probe.THROTTLE)
         self.scheduler.accept(key, ProbeResult(Probe.THROTTLE, error='TimeoutError'), self.now)
+        self.assertEqual(sample.confirm, Probe.THROTTLE)  # The third endpoint is tried next.
+        self.scheduler.accept(key, ProbeResult(Probe.THROTTLE, error='TimeoutError'), self.now)
         self.assertFalse(sample.healthy)
         self.assertIsNone(score(sample, 1, self.now, 7200))
 

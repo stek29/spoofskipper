@@ -62,6 +62,12 @@ class SampleHealthTests(unittest.TestCase):
                 self.assertEqual(sample.failed_at, 101)
                 sample.record(failed(probe), 102)
                 self.assertEqual(sample.failed_at, 101)
+        sample = Sample(health=Health.HEALTHY)
+        for now in (100, 101):  # One attempt per endpoint, with three endpoints.
+            sample.record(failed(Probe.GATE), now, failures_to_fail=3)
+            self.assertEqual((sample.health, sample.confirm), (Health.HEALTHY, Probe.GATE))
+        sample.record(failed(Probe.GATE), 102, failures_to_fail=3)
+        self.assertEqual(sample.health, Health.FAILED)
 
     def test_gate_success_clears_only_gate_failures(self):
         sample = Sample(health=Health.HEALTHY)
