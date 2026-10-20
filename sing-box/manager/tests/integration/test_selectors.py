@@ -47,15 +47,19 @@ class OwnershipReload:
         self.settings['managed_selectors'] = list(SELECTORS)
         write_json(self.config/'local-manager.json', self.settings)
         self.proc.send_signal(signal.SIGHUP)
-        flattened = lambda tag: set(clash_api.proxies(self.live())[tag]['all']) == {'example_one', 'extra_one'}
-        wait_for(lambda: flattened('restricted'))
+        def members(tag):
+            try:  # The API is briefly unavailable while the core reloads.
+                return set(clash_api.proxies(self.live())[tag]['all'])
+            except OSError:
+                return set()
+        wait_for(lambda: members('restricted') == {'example_one', 'extra_one'})
         self.assertIn('example', {o['tag'] for o in self.live()['outbounds']})
         wait_for(lambda: clash_api.proxies(self.live())['traffic']['now'] == 'extra_one')
         # Removal restores the native members; dashboard control is writable.
         self.settings['managed_selectors'] = ['traffic', 'transport']
         write_json(self.config/'local-manager.json', self.settings)
         self.proc.send_signal(signal.SIGHUP)
-        wait_for(lambda: 'example' in clash_api.proxies(self.live())['restricted']['all'])
+        wait_for(lambda: 'example' in members('restricted'))
         c = self.live()
         clash_api.select(c, 'restricted', 'extra', ['restricted'])
         time.sleep(.3)

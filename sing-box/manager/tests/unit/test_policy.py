@@ -283,8 +283,8 @@ class PolicySchedulingTests(unittest.TestCase):
         for future, args in self.submitted:
             if not future.done() and args[-1] == kind:
                 size = {'gate': 1, 'throttle': THROTTLE, 'throughput': THROTTLE + SKIP}[kind]
-                future.set_result((ProbeResult(Probe(kind), ok=True, **{'bytes': size, 'latency_ms': 50,
-                                   'completed_at': self.now, **kw}), True))
+                future.set_result(ProbeResult(Probe(kind), ok=True, **{'bytes': size, 'latency_ms': 50,
+                                   'completed_at': self.now, **kw}))
 
     def test_elective_test_priority_and_real_completion_before_write(self):
         self.scheduler.tick()

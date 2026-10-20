@@ -2,7 +2,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import time
 import weakref
-from . import clash_api
 from .controller import SelectorController
 from .compiler import probe_outbounds
 from .graph import OutboundGraph
@@ -10,10 +9,6 @@ from .identity import Candidate, sample_key
 from .probes import Probe, ProbeClient
 from .samples import Health, Sample
 from .settings import Settings, INSPECT_SECONDS, SHORTLIST_SIZE
-
-
-def path_identity(config, proxies, tag):
-    return OutboundGraph(config).path_identity(tag, proxies)
 
 
 class Scheduler:
@@ -28,6 +23,7 @@ class Scheduler:
         self.clients = weakref.WeakSet()
         self.controller = SelectorController(self, log)
         self.requested = {}
+        self.job_versions = {}
         self.configured = None
         self.graph, self.members = None, {}
 
@@ -108,6 +104,7 @@ class Scheduler:
         for key, probe, _ in self.jobs.values():
             self.rearm_cancelled(key, probe)
         self.jobs.clear()
+        self.job_versions.clear()
 
     def restart_client(self):
         self.client = ProbeClient(self.settings)
@@ -128,16 +125,10 @@ class Scheduler:
         return {key for keys in groups.values()
                 for key in sorted(keys, key=lambda k: self.samples[k].latency_or_inf)[:SHORTLIST_SIZE]}
 
-    def perform(self, client, config, candidate, probe):
-        outbound = candidate.outbound
-        key = sample_key(outbound)
-        version = self.path_versions.get(key, 0)
-        dependent = bool(outbound.get('detour'))
-        before = path_identity(config, clash_api.proxies(config), outbound['tag']) if dependent else key
-        result = client.run(outbound, probe)
-        after = path_identity(config, clash_api.proxies(config), outbound['tag']) if dependent else key
+    def perform(self, client, candidate, probe):
+        result = client.run(candidate.outbound, probe)
         result.completed_at = self.clock()
-        return result, before == after and version == self.path_versions.get(key, 0)
+        return result
 
     def accept(self, key, result, now):
         self.samples[key].record(result, now)
@@ -160,14 +151,17 @@ class Scheduler:
             if not future.done():
                 continue
             del self.jobs[future]
+            version = self.job_versions.pop(future, None)
             if epoch != self.epoch:
                 self.rearm_cancelled(key, probe)
                 self.log('probe_discarded', candidate=key.tag, reason='reload_or_upstream_change')
                 continue
-            # Ordinary discards consumed an attempt: retain its submission cadence.
+            # Inspection changed the path (e.g. an upstream selector) while the
+            # probe ran: the result belongs to neither path. Ordinary discards
+            # consumed an attempt, so they retain their submission cadence.
             try:
-                result, valid = future.result()
-                if key in self.samples and valid:
+                result = future.result()
+                if key in self.samples and version in (None, self.path_versions.get(key, 0)):
                     self.accept(key, result, result.completed_at or now)
                     self.samples[key].last[probe] = now  # Never catch up missed runs.
                 else:
@@ -236,7 +230,8 @@ class Scheduler:
             sample.last[probe] = now
             if sample.confirm is probe:
                 sample.confirm = None
-            future = self.pool.submit(self.perform, self.client, self.config, candidate, probe)
+            future = self.pool.submit(self.perform, self.client, candidate, probe)
             self.jobs[future] = (key, probe, self.epoch)
+            self.job_versions[future] = self.path_versions.get(key, 0)
         if policy_error is not None:
             raise policy_error

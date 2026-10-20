@@ -60,7 +60,7 @@ class RefreshFailureTests(unittest.TestCase):
                         providers.commit.assert_not_called()
                     real_tick()
                     self.assertTrue(submit.called)
-                    self.assertTrue(all(call.args[2] == expected for call in submit.call_args_list))
+                    self.assertTrue(all(call.args[1] is scheduler.client for call in submit.call_args_list))
                 else:
                     self.assertEqual(scheduler.settings.managed_selectors, ())
                     if case == 'disable':

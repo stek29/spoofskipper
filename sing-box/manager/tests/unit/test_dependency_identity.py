@@ -72,9 +72,15 @@ class DependencyIdentityTests(unittest.TestCase):
     def test_nested_detour_selection_change_discards_crossing_probe(self):
         after = copy.deepcopy(self.api)
         after['transport']['now'] = 't2'
-        client = Mock()
-        client.run.return_value = ProbeResult(Probe.GATE, ok=True)
-        with patch.object(clash_api, 'proxies', side_effect=[self.api, after]):
-            _, valid = self.scheduler.perform(client, self.config,
-                self.scheduler.candidates[self.key], 'gate')
-        self.assertFalse(valid)
+        future = Future()
+        with patch.object(self.scheduler.pool, 'submit', return_value=future):
+            self.scheduler.jobs.clear()
+            self.scheduler.requested = {self.key: Probe.GATE}
+            self.scheduler.tick()
+        self.assertIn(future, self.scheduler.jobs)
+        with patch.object(clash_api, 'proxies', return_value=after):
+            self.scheduler.controller.inspect()  # The upstream changed while the probe ran.
+        future.set_result(ProbeResult(Probe.GATE, ok=True, bytes=1))
+        self.scheduler.collect(101)
+        self.assertNotIn(Probe.GATE, {p for p in self.scheduler.samples[self.key].last if self.scheduler.samples[self.key].last[p] == 101})
+        self.assertIsNone(self.scheduler.samples[self.key].latency)

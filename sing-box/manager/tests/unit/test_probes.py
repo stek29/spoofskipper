@@ -42,7 +42,7 @@ class SchedulingTests(unittest.TestCase):
                 fields = {'bytes': size, 'latency_ms': 30, **extra}
                 if probe is not Probe.THROUGHPUT:
                     fields.pop('mbps', None)
-                future.set_result((ProbeResult(probe, ok=True, **fields), True))
+                future.set_result(ProbeResult(probe, ok=True, **fields))
 
     def test_bounded_gates_dedup_and_no_catchup(self):
         self.scheduler.tick()
@@ -126,17 +126,6 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.scheduler.next_test(key, [], self.now + 1), Probe.THROTTLE)
         sample.last[Probe.THROTTLE] = self.now + 1
         self.assertIsNone(self.scheduler.next_test(key, [], self.now + 2))
-
-    def test_chained_changed_upstream_discards(self):
-        class Client:
-            def run(self, *_):
-                return ProbeResult(Probe.GATE, ok=True)
-        config = {'outbounds': [{'type': 'direct', 'tag': tag} for tag in ('a', 'b')] +
-                  [{'type': 'selector', 'tag': 'chained_upstream', 'outbounds': ['a', 'b']}]}
-        with patch('spoofskipper_manager.scheduler.clash_api.proxies', side_effect=[{'chained_upstream': {'now': 'a'}}, {'chained_upstream': {'now': 'b'}}]):
-            config['endpoints'] = [{'type': 'wireguard', 'tag': 'tunnel', 'detour': 'chained_upstream'}]
-            _, valid = self.scheduler.perform(Client(), config, Candidate(config['endpoints'][0], 'tunnel'), Probe.GATE)
-        self.assertFalse(valid)
 
     def test_routes_do_not_change_selectors_and_are_first(self):
         config = {'outbounds': self.config['outbounds'] + [{'type': 'selector', 'tag': 'proxy_main', 'outbounds': ['c0']}],
