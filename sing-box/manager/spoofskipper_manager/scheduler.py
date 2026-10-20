@@ -7,9 +7,9 @@ from .controller import SelectorController
 from .compiler import probe_outbounds
 from .graph import OutboundGraph
 from .identity import Candidate, sample_key
-from .probes import Accounting, Probe, ProbeClient
+from .probes import Probe, ProbeClient
 from .samples import Health, Sample
-from .settings import Settings, INSPECT_SECONDS, SUMMARY_SECONDS
+from .settings import Settings, INSPECT_SECONDS
 
 
 def path_identity(config, proxies, tag):
@@ -24,8 +24,7 @@ class Scheduler:
         self.epoch, self.config, self.settings = 0, None, Settings()
         self.started = clock()
         self.paths, self.path_versions, self.proxy_choices = {}, {}, {}
-        self.active, self.last_inspect, self.last_summary = {}, float('-inf'), clock()
-        self.accounting = Accounting()
+        self.active, self.last_inspect = {}, float('-inf')
         self.client = None
         self.clients = weakref.WeakSet()
         self.controller = SelectorController(self, log)
@@ -56,7 +55,7 @@ class Scheduler:
         self.candidates = {sample_key(c.outbound): c for c in entries}
         self.samples = {k: self.samples.get(k, Sample()) for k in self.candidates}
         self.update_paths(self.proxy_choices)
-        self.client = ProbeClient(self.settings, accounting=self.accounting) if enabled else None
+        self.client = ProbeClient(self.settings) if enabled else None
         if self.client:
             self.clients.add(self.client)
         self.last_inspect = float('-inf')
@@ -111,7 +110,7 @@ class Scheduler:
         self.jobs.clear()
 
     def restart_client(self):
-        self.client = ProbeClient(self.settings, accounting=self.accounting)
+        self.client = ProbeClient(self.settings)
         self.clients.add(self.client)
 
     def close(self):
@@ -211,9 +210,6 @@ class Scheduler:
                 self.log('probe_inspection_failed', error=type(exc).__name__)
             self.last_inspect = now
         self.controller.apply_policy(now)
-        if now-self.last_summary >= SUMMARY_SECONDS:
-            self.controller.summary(now)
-            self.last_summary = now
         busy = {key for key, _, _ in self.jobs.values()}
         gates = sum(probe is Probe.GATE for _, probe, _ in self.jobs.values())
         # Gates run in parallel; body probes download one at a time.
@@ -237,8 +233,6 @@ class Scheduler:
                     continue
                 downloading = True
             sample.last[probe] = now
-            if key in self.requested:
-                self.accounting.add(policy_tests=1, **({'challenger_tests': 1} if probe is Probe.THROUGHPUT else {}))
             if sample.confirm is probe:
                 sample.confirm = None
             future = self.pool.submit(self.perform, self.client, self.config, candidate, probe)

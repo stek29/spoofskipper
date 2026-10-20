@@ -144,17 +144,13 @@ class ProbeIntegrationTests(unittest.TestCase):
         wait_for(ready)
         self.client = ProbeClient(self.settings)
 
-    def test_exact_gate_throttle_and_application_accounting(self):
+    def test_exact_gate_and_throttle_bodies(self):
         self.assertTrue(self.client.run(self.outbound, 'gate').ok)
         result = self.client.run(self.outbound, 'throttle')
         self.assertTrue(result.ok, result)
         self.assertEqual(result.bytes, THROTTLE)
         self.assertIsNotNone(result.burst_seconds)
-        counts = self.client.accounting.summary()['today']
-        self.assertEqual(counts['body_received'], 1+THROTTLE)
         self.assertEqual(self.served, 1+THROTTLE)
-        self.assertGreater(counts['received'], counts['body_received'])
-        self.assertGreater(counts['sent'], 0)
 
     def test_generic_static_socks_chain_tracks_arbitrary_selector(self):
         from spoofskipper_manager.scheduler import Scheduler
@@ -375,9 +371,7 @@ class ProbeIntegrationTests(unittest.TestCase):
             retained = scheduler.samples[key]
             scheduler.configure(self.config, [candidate], self.settings)
             self.assertIs(scheduler.samples[key], retained)
-            scheduler.controller.summary(time.monotonic())
             self.assertEqual(clash_api.proxies(self.config)['proxy_main']['now'], before)
-            self.assertTrue(any(e == 'observe_summary' for e, _ in events))
             self.mode = 'freeze'
             future = scheduler.pool.submit(scheduler.client.run, self.outbound, 'throttle')
             time.sleep(.05)
@@ -430,8 +424,6 @@ class ProbeIntegrationTests(unittest.TestCase):
             self.mode = mode
             result = self.client.run(self.outbound, 'gate')
             self.assertFalse(result.ok, (mode, result))
-        counts = self.client.accounting.summary()['today']
-        self.assertEqual(counts['body_received'], self.served)
 
     def test_cancel_during_tls_handshake(self):
         from concurrent.futures import ThreadPoolExecutor

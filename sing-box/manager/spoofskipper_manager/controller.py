@@ -2,7 +2,7 @@
 from . import clash_api
 from .clash_api import resolve
 from .compiler import selectors
-from .policy import Policy, score, eligible_pool
+from .policy import Policy, score
 from .probes import Probe
 from .settings import ACTIVE_SCORE_MAX_AGE
 
@@ -75,36 +75,3 @@ class SelectorController:
                 self.inspect()  # Invalidate samples whose effective paths changed.
             except Exception as exc:
                 self.log('selector_write_failed', selector=selector, error=type(exc).__name__)
-
-    def summary_choice(self, selector, now):
-        measurements = self.measurements
-        current = measurements.active.get(selector)
-        members = measurements.selector_members(selector)
-        pool = eligible_pool(selector, current, measurements.candidates, measurements.samples,
-                             now, measurements.settings, members)
-        if selector in measurements.settings.managed_selectors:
-            decision = self.decisions.get(selector)
-            proposed = decision.target if decision else None
-            if decision and proposed is None:
-                proposed = pool.active  # The policy keeps the current route.
-            reason = decision.reason if decision else 'awaiting_policy'
-        else:
-            proposed = max(pool.available, key=pool.rank) if pool.available and not pool.unresolved else None
-            reason = ('priority_health_unknown' if pool.unresolved else
-                      'observed_ranking' if proposed else 'health_or_performance_unknown')
-        choice = {'active': current, 'proposed': proposed.tag if proposed else None,
-                  'proposed_score': pool.value(proposed, ACTIVE_SCORE_MAX_AGE if proposed == pool.active
-                                              else None) if proposed else None, 'reason': reason}
-        if selector in measurements.settings.managed_selectors:
-            choice['decision_reason'] = reason
-        if pool.active:
-            sample = measurements.samples[pool.active]
-            choice.update(score=pool.value(pool.active, ACTIVE_SCORE_MAX_AGE),
-                          sample_age=now-sample.throughput_at if sample.successes else None)
-        return choice
-
-    def summary(self, now):
-        choices = {selector: self.summary_choice(selector, now)
-                   for selector in selectors(self.measurements.config)}
-        self.log('observe_summary', selectors=choices,
-                 application_bytes=self.measurements.accounting.summary(reset=True))

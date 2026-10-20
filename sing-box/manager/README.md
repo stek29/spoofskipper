@@ -113,10 +113,9 @@ URLTest checks remain independently active.
    in private `config.jsonnet` with
    `local sub_data = std.extVar('subscription_outbounds');`.
 4. Keep the existing loopback-reachable Clash API controller; authentication is
-   optional. Seed `/data/providers` from a checked scratch dry-run, preserving
-   the running core's `cache.db`. Start with probes disabled and no managed selectors.
+   optional. Start with probes disabled and no managed selectors.
 5. Verify the revision and existing routes. Enable probes and `/reload` to observe
-   measurements. Add selectors one at a time after reviewing the summaries.
+   `probe_sample` logs. Add selectors one at a time.
 
 A managed selector is flattened to proxy leaves while preserving its resolved
 choice through a verified write. Shared native groups remain while referenced.
@@ -151,33 +150,18 @@ For full image/cron rollback:
 The old image ignores manager state. Reverting the image tag alone is insufficient:
 the legacy entrypoint needs the restored Compose command.
 
-## Diagnostics and verification
-
-Use separate, empty scratch directories and read-only config mounts. Never use
-live `/data` for diagnostics. `render-check` expects the unedited private template
-and derives the extVar change in a temporary copy. Its mode-0600 `render.diff`
-can contain credentials. Core/Jsonnet error output is suppressed to protect secrets.
+## Tests
 
 ```sh
-docker build --build-arg REVISION=v1.14.3 -t spoofskipper-manager:test sing-box
-docker run --rm --tmpfs /data -v "$CONFIG:/config:ro" -v "$SCRATCH:/scratch" \
-  spoofskipper-manager:test refresh-dry-run --state-dir /scratch/fetched
-docker run --rm --network none --tmpfs /data \
-  -v "$CONFIG:/config:ro" -v "$SCRATCH:/scratch" spoofskipper-manager:test \
-  render-check --state-dir /scratch/comparison --snapshots /scratch/fetched
 python3 -m unittest discover -s sing-box/manager/tests/unit
+docker build --build-arg REVISION=v1.14.3 -t spoofskipper-manager:test sing-box
 sing-box/manager/tests/run-integration
-sing-box/manager/tests/run-rollback
 ```
 
 The integration harness uses the preloaded `spoofskipper-manager:test`, mounted
-code/tests, an unprivileged user and an internal Docker network. Rollback also
-requires `spoofskipper-legacy:test`, built from the pre-cutover Dockerfile,
-entrypoint and reload script. It restores release inputs from `b03a046`
-(overridable with `MANAGER_LEGACY_REF`) and exercises their Compose command.
-Both harnesses use synthetic fixtures and no real providers. Fixture keys are
-public test credentials. The historical live driver is archived with private validation notes outside
-the tracked suite; it is not a supported test interface for this runtime.
+code/tests, an unprivileged user and an internal Docker network. It uses
+synthetic fixtures and no real providers; fixture keys are public test credentials.
+Core/Jsonnet error output is suppressed in logs to protect secrets.
 
 ## Logs
 
@@ -194,15 +178,7 @@ the tracked suite; it is not a supported test interface for this runtime.
 | `probe_sample`, `probe_failed`, `probe_discarded` | Measurement result, failure or invalidated result |
 | `probe_inspection_failed`, `scheduler_tick_failed` | Measurement/control error logged while the core remains running |
 | `selector_decision`, `selector_switched`, `selector_handoff`, `selector_write_failed` | Policy reason, verified write or write failure |
-| `observe_summary` | Choices, scores/ages, actual managed decisions and unmanaged eligible rankings |
 | `shutdown_requested`, `manager_failed` | Requested shutdown or startup failure |
-
-`observe_summary.application_bytes.hour` counts application traffic since the
-previous summary and resets after logging; `today` counts the UTC day. Counters
-include partial attempts, CONNECT/HTTP requests, headers/framing, received bodies,
-and skipped prefixes. `body_received` counts consumed decoded body bytes;
-received bytes also include buffer read-ahead. TLS/transport overhead and unread
-server buffers are excluded. These are application counters, not billing totals.
 
 Repeated `scheduler_tick_failed` errors are logged at most once per error type
 per minute, with a cumulative `count`. The manager keeps retrying ticks and

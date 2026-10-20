@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 ACTIVE_SCORE_MAX_AGE = 7200
 FRESH_SAMPLE_SECONDS = 30
 INSPECT_SECONDS = 5
-SUMMARY_SECONDS = 3600
 SCHEDULER_ERROR_LOG_SECONDS = 60
 # Policy invariants, deliberately fixed rather than operator-tunable cadences.
 HOLD = 300

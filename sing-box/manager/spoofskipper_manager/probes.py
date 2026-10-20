@@ -1,6 +1,5 @@
 """Bounded HTTPS measurements using the standard-library CONNECT/HTTP client."""
 import base64
-from collections import Counter
 from dataclasses import asdict, dataclass
 from enum import Enum
 import http.client
@@ -57,36 +56,8 @@ class ProbeResult:
         return {k: v for k, v in asdict(self).items() if v is not None and k != 'completed_at'}
 
 
-class Accounting:
-    """Plaintext HTTP bytes, including partial I/O and response read-ahead."""
-    def __init__(self, clock=time.time):
-        self.clock, self.lock = clock, threading.Lock()
-        self.period, self.today = Counter(), Counter()
-        self.day = int(clock() // 86400)
-
-    def roll_day(self):
-        day = int(self.clock() // 86400)
-        if day != self.day:
-            self.day = day
-            self.today.clear()
-
-    def add(self, **counts):
-        with self.lock:
-            self.roll_day()
-            self.period.update(counts)
-            self.today.update(counts)
-
-    def summary(self, reset=False):
-        with self.lock:
-            self.roll_day()
-            totals = {'hour': dict(self.period), 'today': dict(self.today)}
-            if reset:
-                self.period.clear()
-            return totals
-
-
 class _ResponseSocket:
-    """Supply HTTPResponse with a metered, buffered stream; no HTTP parsing here."""
+    """Supply HTTPResponse with a deadline-checked, buffered stream; no HTTP parsing here."""
     def __init__(self, sock, connection):
         self.sock, self.connection = sock, connection
 
@@ -113,7 +84,6 @@ class _Reader(io.RawIOBase):
         count = self.raw.readinto(buffer)
         if count and connection.first_byte is None:
             connection.first_byte = connection.client.clock()
-        connection.client.accounting.add(received=count)
         return count
 
 
@@ -145,14 +115,8 @@ class _Connection(http.client.HTTPSConnection):
     def send(self, data):
         if self.sock is None:
             self.connect()
-        view = memoryview(data)
-        while view:
-            self.arm(self.sock)
-            sent = self.sock.send(view)
-            if not sent:
-                raise OSError('closed while sending')
-            self.client.accounting.add(sent=sent)
-            view = view[sent:]
+        self.arm(self.sock)
+        self.sock.sendall(data)
 
 
 def validate_response(response, expected):
@@ -167,9 +131,8 @@ def validate_response(response, expected):
 
 
 class ProbeClient:
-    def __init__(self, settings, accounting=None, clock=time.monotonic):
+    def __init__(self, settings, clock=time.monotonic):
         self.settings, self.clock = Settings.from_mapping(settings), clock
-        self.accounting = accounting or Accounting()
         self.context = ssl.create_default_context(cafile=self.settings.probe_ca_bundle)
         self.cancelled = threading.Event()
         self.lock, self.connections = threading.Lock(), set()
@@ -251,7 +214,4 @@ class ProbeClient:
             result.seconds = self.clock() - started
             result.latency_ms = (first-started)*1000 if first is not None else None
             result.burst_seconds = burst
-            # Socket-level sent/received bytes are counted as they happen; the rest once here.
-            self.accounting.add(probes=1, partial=int(not result.ok), early_stops=int(result.early_stop),
-                                body_received=body, skipped=result.skipped)
         return result

@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
 from spoofskipper_manager.identity import Candidate
-from spoofskipper_manager.probes import SKIP, THROTTLE, Accounting, Probe, ProbeResult, sample_key
+from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult, sample_key
 from spoofskipper_manager.scheduler import Health, Scheduler, Sample
 from spoofskipper_manager.policy import score
 
@@ -144,18 +144,6 @@ class SchedulingTests(unittest.TestCase):
             _, valid = self.scheduler.perform(Client(), config, Candidate(config['endpoints'][0], 'tunnel'), Probe.GATE)
         self.assertFalse(valid)
 
-    def test_accounting_period_reset_preserves_day_total(self):
-        account = Accounting(clock=lambda: self.now)
-        account.add(sent=1, received=2, skipped=1)
-        self.now += 3600
-        account.add(received=3)
-        self.assertEqual(account.summary(reset=True)['hour'], {'sent': 1, 'received': 5, 'skipped': 1})
-        self.assertEqual(account.summary()['hour'], {})
-        self.assertEqual(account.summary()['today']['received'], 5)
-        self.now += 86400
-        account.add(received=7)
-        self.assertEqual(account.summary()['today'], {'received': 7})
-
     def test_routes_do_not_change_selectors_and_are_first(self):
         config = {'outbounds': self.config['outbounds'] + [{'type': 'selector', 'tag': 'proxy_main', 'outbounds': ['c0']}],
                   'route': {'rules': [{'outbound': 'proxy_main'}]}}
@@ -182,22 +170,6 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.scheduler.next_test(key, [], self.now), 'throttle')
         sample.last['throttle'] = self.now
         self.assertIsNone(self.scheduler.next_test(key, [], self.now))
-
-
-    def test_proposed_main_includes_chained_but_upstream_excludes_it(self):
-        chained = {'type': 'wireguard', 'tag': 'chained', 'detour': 'chained_upstream'}
-        config = {'outbounds': self.config['outbounds'] + [
-            {'type': 'selector', 'tag': 'proxy_main', 'outbounds': ['c0', 'chained']},
-            {'type': 'selector', 'tag': 'chained_upstream', 'outbounds': ['c0']}], 'endpoints': [chained]}
-        self.scheduler.configure(config, self.candidates, {'probes_enabled': True})
-        for key, sample in self.scheduler.samples.items():
-            sample.health, sample.latency = Health.HEALTHY, 20
-            sample.healthy_at = self.now
-            sample.successes = [(self.now, 50 if key[0] == 'chained' else 1, 20)]
-        self.scheduler.controller.summary(self.now)
-        choices = self.logs[-1][1]['selectors']
-        self.assertEqual(choices['proxy_main']['proposed'], 'chained')
-        self.assertNotEqual(choices['chained_upstream']['proposed'], 'chained')
 
 
     def test_active_warmup_does_not_wait_after_throttle(self):

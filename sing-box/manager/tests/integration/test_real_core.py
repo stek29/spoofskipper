@@ -54,38 +54,6 @@ class RealCoreTests(test_lifecycle.LifecycleTests):
             (self.config / 'config.jsonnet').write_text(self.source)
             self.ready()
 
-    def test_diagnostics_are_scratch_only_and_diff_is_revision_only(self):
-        # Legacy baseline uses identical fixture data; dry-run owns scratch only.
-        private = self.config / 'config.jsonnet'
-        private.write_text(self.source.replace(compiler.EXTVAR_LINE, compiler.IMPORT_LINE))
-        snapshot = {'outbounds': [{'type': 'trojan', 'tag': 'example_one', 'server': '127.0.0.1',
-                                  'server_port': 1, 'password': 'secret'}], 'groups': {'example': ['example_one']}}
-        write_json(self.config / 'local-subs.json', snapshot)
-        cache = self.state / 'cache.db'
-        self.state.mkdir()
-        cache.write_bytes(b'live-cache-sentinel')
-        before = {p.name: p.read_bytes() for p in self.config.iterdir() if p.is_file()}
-        def run(command, state, extra=()):
-            return subprocess.run([sys.executable, '-m', 'spoofskipper_manager', command,
-                '--config-dir', str(self.config), '--state-dir', str(state), '--core', self.core, *extra],
-                env={**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[2])}, capture_output=True)
-        scratch = self.root / 'dry-run'
-        result = run('refresh-dry-run', scratch)
-        self.assertEqual(result.returncode, 0, result.stdout)
-        compare = self.root / 'compare'
-        result = run('render-check', compare, ['--snapshots', str(scratch)])
-        self.assertEqual(result.returncode, 0, result.stdout)
-        diff = (compare / 'render.diff').read_text()
-        self.assertIn(compiler.REVISION_PREFIX, diff)
-        self.assertNotIn('example_one', '\n'.join(line for line in diff.splitlines() if line.startswith(('+', '-'))))
-        self.assertEqual(before, {p.name: p.read_bytes() for p in self.config.iterdir() if p.is_file()})
-        self.assertEqual(cache.read_bytes(), b'live-cache-sentinel')
-        self.assertFalse((self.state / 'sing.json').exists())
-        private.write_text('local changed = true;\n' + private.read_text().replace(compiler.IMPORT_LINE, 'local sub_data = {};'))
-        result = run('render-check', self.root / 'bad-compare', ['--snapshots', str(scratch)])
-        self.assertNotEqual(result.returncode, 0)
-
-
     def test_disable_probes_reload_preserves_refresh_owner_and_selectors(self):
         from test_lifecycle import free_port
         self.settings.update(probes_enabled=True, probe_port=free_port(), probe_timeout=.3,
