@@ -1,10 +1,8 @@
 """Bounded HTTPS measurements using the standard-library CONNECT/HTTP client."""
 import base64
 from collections import Counter
-import hashlib
 import http.client
 import io
-import json
 import re
 import socket
 import ssl
@@ -13,20 +11,11 @@ import time
 from urllib.parse import urlsplit
 
 GATE, THROTTLE, SKIP, TOTAL = 1, 256 * 1024, 512 * 1024, 8 * 1024 * 1024
+from .identity import identity, sample_key
 from .settings import Settings, NUMERIC_DEFAULTS
 
 # Kept as a numeric defaults mapping for public measurement/test helpers.
 DEFAULTS = NUMERIC_DEFAULTS
-
-
-def sample_key(outbound):
-    return outbound['tag'], hashlib.sha256(json.dumps(outbound, sort_keys=True,
-        separators=(',', ':')).encode()).hexdigest()
-
-
-def identity(outbound):
-    digest = sample_key(outbound)[1]
-    return 'probe_' + digest, digest
 
 
 class Accounting:

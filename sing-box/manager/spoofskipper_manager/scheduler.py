@@ -10,6 +10,7 @@ from .controller import SelectorController
 from .settings import (Settings, INSPECT_SECONDS, SUMMARY_SECONDS,
                        GATE_FAILURE_THRESHOLD)
 from .compiler import probe_outbounds
+from .graph import OutboundGraph
 
 
 class Health(Enum):
@@ -98,22 +99,7 @@ class Sample:
 
 
 def path_identity(config, proxies, tag):
-    """Rendered candidate identity including selected groups and recursive detours."""
-    entries = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
-    def visit(tag, seen):
-        if tag in seen or tag not in entries:
-            raise ValueError('invalid upstream dependency')
-        entry = entries[tag]
-        dependencies = []
-        if entry.get('type') in ('selector', 'urltest'):
-            selected = proxies.get(tag, {}).get('now')
-            if selected not in entry['outbounds']:
-                raise ValueError('upstream selection unavailable')
-            dependencies.append(selected)
-        if entry.get('detour'):
-            dependencies.append(entry['detour'])
-        return sample_key(entry), tuple(visit(member, seen | {tag}) for member in dependencies)
-    return visit(tag, set())
+    return OutboundGraph(config).path_identity(tag, proxies)
 
 
 class Scheduler:

@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from .clash_api import credentials
 from .state import atomic_write
+from .graph import OutboundGraph
+from .identity import identity
 
 REVISION_PREFIX = '__spoofskipper_revision_'
 IMPORT_LINE = "local sub_data = std.parseJson(importstr 'local-subs.json');"
@@ -19,35 +21,7 @@ def edited_source(source):
 
 def validate(config):
     credentials(config)
-    entries = config.get('outbounds', []) + config.get('endpoints', [])
-    tags = {entry['tag']: entry for entry in entries}
-    if len(tags) != len(entries):
-        raise ValueError('duplicate outbound/endpoint tags')
-    edges = {}
-    for tag, entry in tags.items():
-        dependencies = list(entry.get('outbounds', []))
-        if entry.get('detour'):
-            dependencies.append(entry['detour'])
-        if entry.get('type') in ('selector', 'urltest') and not dependencies:
-            raise ValueError('empty selector group')
-        if entry.get('default') and entry['default'] not in dependencies:
-            raise ValueError('selector default is not a member')
-        if any(member not in tags for member in dependencies):
-            raise ValueError('unknown outbound dependency')
-        edges[tag] = dependencies
-    active, done = set(), set()
-    def visit(tag):
-        if tag in active:
-            raise ValueError('outbound dependency cycle')
-        if tag in done:
-            return
-        active.add(tag)
-        for member in edges[tag]:
-            visit(member)
-        active.remove(tag)
-        done.add(tag)
-    for tag in tags:
-        visit(tag)
+    OutboundGraph(config).validate()
 
 
 def revision(config):
@@ -102,15 +76,7 @@ def selectors(config):
 
 
 def selector_members(config, selector):
-    entries = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
-    def leaves(tag, seen):
-        if tag in seen:
-            raise ValueError('selector dependency cycle')
-        entry = entries[tag]
-        if entry.get('type') in ('selector', 'urltest'):
-            return [leaf for member in entry['outbounds'] for leaf in leaves(member, seen | {tag})]
-        return [tag]
-    return leaves(selector, set())
+    return OutboundGraph(config).leaves(selector)
 
 
 def probe_outbounds(config, candidates=()):
@@ -122,7 +88,6 @@ def probe_outbounds(config, candidates=()):
 def add_probe_routes(config, settings, candidates):
     if not settings.get('probes_enabled', False):
         return
-    from .probes import identity
     if any(i.get('tag') == PROBE_TAG for i in config.get('inbounds', [])):
         raise ValueError('reserved probe inbound tag')
     outbounds = probe_outbounds(config, candidates)
@@ -142,22 +107,18 @@ def handoff_selectors(config, managed, candidates):
     """Flatten owned selectors; retain native groups with any other reference."""
     if not managed:
         return
-    tags = {o['tag']: o for o in config.get('outbounds', []) + config.get('endpoints', [])}
-    selectable = {o['tag'] for o in probe_outbounds(config, candidates)}
+    graph = OutboundGraph(config)
+    tags = graph.entries
+    selectable = {outbound['tag'] for outbound in probe_outbounds(config, candidates)}
     removed = set()
-    def leaves(tag):
-        entry = tags[tag]
-        if entry.get('type') in ('selector', 'urltest'):
-            if entry['type'] == 'urltest':
-                removed.add(tag)
-            return [leaf for member in entry['outbounds'] for leaf in leaves(member)]
-        return [tag]
     validate(config)  # Reject cycles before recursively expanding members.
     for selector in managed:
         if tags.get(selector, {}).get('type') != 'selector':
             raise ValueError('managed selector missing or incompatible')
         entry = tags[selector]
-        members = list(dict.fromkeys(leaf for member in entry['outbounds'] for leaf in leaves(member)))
+        groups = set()
+        members = list(dict.fromkeys(graph.leaves(selector, groups)))
+        removed.update(tag for tag in groups if tags[tag]['type'] == 'urltest')
         if not members or any(tag not in selectable for tag in members):
             raise ValueError('managed selector has incompatible candidate members')
         entry['outbounds'] = members
