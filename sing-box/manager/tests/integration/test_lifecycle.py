@@ -71,7 +71,7 @@ class LifecycleTests(unittest.TestCase):
                          'bootstrap_backoff_seconds': .1, 'bootstrap_backoff_max_seconds': .2}
         write_json(self.config / 'local-manager.json', self.settings)
         source = (self.config / 'config.jsonnet').read_text()
-        self.source = compiler.edited_source(source).replace('19090', str(free_port()))
+        self.source = source.replace('19090', str(free_port()))  # Unedited: imports local-subs.json.
         (self.config / 'config.jsonnet').write_text(self.source)
         # Deliberately stale: no outbound with this tag may appear in a render.
         write_json(self.config / 'local-subs.json', {'outbounds': [{'type': 'direct', 'tag': 'stale'}], 'groups': {}})
@@ -121,6 +121,16 @@ class LifecycleTests(unittest.TestCase):
         wait_for(lambda: 'provider_refresh_failed' in self.logs())
         self.assertIsNone(self.proc.poll())
         self.assertNotIn('secret@', self.logs())
+
+    def test_without_subscriptions_the_config_directory_renders_as_is(self):
+        (self.config / 'local-subs-config.json').unlink()
+        write_json(self.config / 'local-subs.json', {'outbounds': [{'type': 'direct', 'tag': 'static_one'}],
+                                                     'groups': {'static': ['static_one']}})
+        self.start()
+        self.ready()
+        self.assertIn('static_one', json.dumps(self.live()))  # The operator's own local-subs.json.
+        self.assertIsNone(self.proc.poll())
+        self.assertNotIn('bootstrap_waiting_for_providers', self.logs())
 
     def test_zero_bootstrap_then_runtime_failure_retries_without_fetch(self):
         self.mode = 'empty'

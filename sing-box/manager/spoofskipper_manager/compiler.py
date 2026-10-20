@@ -1,6 +1,7 @@
 """Jsonnet rendering, structural validation, and content-derived revisions."""
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from .clash_api import credentials
@@ -9,16 +10,6 @@ from .graph import OutboundGraph
 from .identity import identity
 
 REVISION_PREFIX = '__spoofskipper_revision_'
-IMPORT_LINE = "local sub_data = std.parseJson(importstr 'local-subs.json');"
-EXTVAR_LINE = "local sub_data = std.extVar('subscription_outbounds');"
-
-
-def edited_source(source):
-    if source.splitlines().count(IMPORT_LINE) != 1:
-        raise ValueError('expected subscription import line exactly once')
-    return source.replace(IMPORT_LINE, EXTVAR_LINE, 1)
-
-
 def validate(config):
     credentials(config)
     OutboundGraph(config).validate()
@@ -40,20 +31,27 @@ def ensure_clash_api(config, port, secret):
 
 
 def render(template, subscriptions, scratch, settings=None, candidates=(), api_secret=''):
-    private = Path(template).parent / 'config.jsonnet'
-    if private.read_text().splitlines().count(EXTVAR_LINE) != 1 or IMPORT_LINE in private.read_text():
-        raise ValueError('private config requires documented subscription extVar edit')
-    scratch = Path(scratch)
-    scratch.mkdir(parents=True, exist_ok=True)
+    """Render a scratch copy of the config directory.
+
+    Merged subscriptions replace local-subs.json, which config.jsonnet already
+    imports, and are also offered as the subscription_outbounds extVar. With
+    subscriptions=None (no providers configured) the directory renders as is.
+    """
+    template, scratch = Path(template), Path(scratch)
+    root = scratch / 'config'
+    shutil.copytree(template.parent, root)
+    if subscriptions is not None:
+        atomic_write(root / 'local-subs.json', json.dumps(subscriptions))
     ext = scratch / 'subscriptions.json'
-    atomic_write(ext, json.dumps(subscriptions))
+    atomic_write(ext, json.dumps(subscriptions or {'outbounds': [], 'groups': {}}))
     try:
         result = subprocess.run(['jsonnet', '--ext-code-file', 'subscription_outbounds=' + str(ext),
-                                 str(template)], capture_output=True, timeout=60)
+                                 str(root / template.name)], capture_output=True, timeout=60)
         if result.returncode:
             raise ValueError('Jsonnet render failed (diagnostics suppressed to protect secrets)')
         config = json.loads(result.stdout)
     finally:
+        shutil.rmtree(root, ignore_errors=True)
         ext.unlink(missing_ok=True)
     ensure_clash_api(config, (settings or {}).get('clash_api_port', 19089), api_secret)
     add_probe_routes(config, settings or {}, candidates)

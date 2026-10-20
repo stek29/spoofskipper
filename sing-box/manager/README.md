@@ -6,9 +6,12 @@ hours, and optionally measures and selects proxy paths. It starts the saved
 subscriptions and current settings without fetching providers.
 
 Private inputs are read-only under `/config`: `sing.jsonnet`, `config.jsonnet`,
-`local-subs-config.json`, and optional `local-manager.json`. State under `/data`
-contains live/previous JSON, an activation marker, and provider snapshots. Keep
-private inputs and diagnostic diffs out of version control.
+and optional `local-subs-config.json` and `local-manager.json`. The manager renders
+a scratch copy of `/config` in which the merged subscriptions replace
+`local-subs.json`, so `config.jsonnet` keeps importing it unchanged. Without
+`local-subs-config.json` there are no providers and `/config` renders as is.
+State under `/data` contains live/previous JSON, an activation marker, and
+provider snapshots. Keep private inputs out of version control.
 
 `ZAPRET_PRERUN` is an optional shell hook before manager startup. `CONFIG_TMPL`
 is no longer supported; use `/config/sing.jsonnet` or the CLI `--config-dir`.
@@ -106,15 +109,11 @@ URLTest checks remain independently active.
 
 ## Enable and disable
 
-1. Save the pre-cutover `docker-compose.yml`, `.env`, image tag, crontab, and
-   private `config.jsonnet` as `config.jsonnet.legacy`.
+1. Save the pre-cutover `docker-compose.yml`, `.env`, image tag and crontab.
 2. Disable only the subscription cron job and verify no refresh is running.
-3. Replace exactly `local sub_data = std.parseJson(importstr 'local-subs.json');`
-   in private `config.jsonnet` with
-   `local sub_data = std.extVar('subscription_outbounds');`.
-4. Keep the existing loopback-reachable Clash API controller; authentication is
+3. Keep the existing loopback-reachable Clash API controller; authentication is
    optional. Start with probes disabled and no managed selectors.
-5. Verify the revision and existing routes. Enable probes and `/reload` to observe
+4. Verify the revision and existing routes. Enable probes and `/reload` to observe
    `probe_sample` logs. Add selectors one at a time.
 
 A managed selector is flattened to proxy leaves while preserving its resolved
@@ -138,14 +137,13 @@ unverified JSON. Unexpected child exit triggers Docker restart.
 For full image/cron rollback:
 
 1. Stop the manager container.
-2. Restore `config.jsonnet.legacy` to `config.jsonnet`.
-3. Run `sing-subs/merge-subs.py` once with the private specs to update `local-subs.json`.
+2. Run `sing-subs/merge-subs.py` once with the private specs to update `local-subs.json`.
    It imports the shared parser from `sing-box/manager`, so run it from a full checkout.
-4. Restore the pre-cutover `docker-compose.yml` and `.env`, for example from the
+3. Restore the pre-cutover `docker-compose.yml` and `.env`, for example from the
    saved pre-cutover commit. Verify `sing-tun.command` is
    `['run', '-c', '/tmp/sing.json']` and `.env` selects the old image tag.
-5. Start that image through restored Compose on the same `/data`.
-6. Restore the subscription cron job and verify exactly one refresh scheduler.
+4. Start that image through restored Compose on the same `/data`.
+5. Restore the subscription cron job and verify exactly one refresh scheduler.
 
 The old image ignores manager state. Reverting the image tag alone is insufficient:
 the legacy entrypoint needs the restored Compose command.

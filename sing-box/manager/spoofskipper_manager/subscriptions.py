@@ -8,13 +8,18 @@ from .state import write_json
 
 
 def read_specs(config_dir):
-    config = json.loads((Path(config_dir) / 'local-subs-config.json').read_text())
+    path = Path(config_dir) / 'local-subs-config.json'
+    if not path.exists():
+        return {'subscriptions': []}  # No providers: render the config directory as is.
+    config = json.loads(path.read_text())
     specs = config.get('subscriptions')
-    if not isinstance(specs, list) or not specs:
-        raise ValueError('subscriptions must be a nonempty list')
-    prefixes = [spec.get('prefix') for spec in specs]
-    if any(not isinstance(p, str) or not p for p in prefixes) or len(set(prefixes)) != len(prefixes):
-        raise ValueError('provider prefixes must be nonempty and unique')
+    if not isinstance(specs, list) or any(not isinstance(spec, dict) for spec in specs):
+        raise ValueError('subscriptions must be a list of objects')
+    for spec in specs:
+        spec.setdefault('prefix', '')  # The sing-subs default.
+    prefixes = [spec['prefix'] for spec in specs]
+    if any(not isinstance(p, str) for p in prefixes) or len(set(prefixes)) != len(prefixes):
+        raise ValueError('provider prefixes must be unique')
     return config
 
 
@@ -25,6 +30,7 @@ class Providers:
         self.settings = settings
         self.log = log
         self.snapshots = {}
+        self.configured = bool(self.config['subscriptions'])
         for spec in self.config['subscriptions']:
             prefix = spec['prefix']
             path = self.path(prefix)
@@ -57,6 +63,8 @@ class Providers:
         return pending
 
     def merged(self, snapshots):
+        if not self.configured:
+            return None
         return merge_outputs([snapshots[s['prefix']]['output'] for s in self.config['subscriptions']
                               if s['prefix'] in snapshots])
 

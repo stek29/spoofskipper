@@ -65,25 +65,38 @@ class CompilerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 compiler.validate(c)
 
-    def test_edit_is_exact(self):
-        self.assertEqual(compiler.edited_source(compiler.IMPORT_LINE), compiler.EXTVAR_LINE)
-        for source in ('local x = 1;', compiler.IMPORT_LINE + '\n' + compiler.IMPORT_LINE):
-            with self.assertRaises(ValueError):
-                compiler.edited_source(source)
+    def test_render_uses_a_scratch_copy_with_current_subscriptions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, scratch = Path(temp) / 'config', Path(temp) / 'scratch'
+            source.mkdir()
+            (source / 'config.jsonnet').write_text("local sub_data = std.parseJson(importstr 'local-subs.json');")
+            (source / 'local-subs.json').write_text('{"outbounds": [], "groups": {"static": []}}')
+            seen = []
+            def run(args, **kw):
+                rendered = Path(args[-1])
+                seen.append(json.loads((rendered.parent / 'local-subs.json').read_text()))
+                return type('Result', (), {'returncode': 0, 'stdout': json.dumps(config())})()
+            with patch.object(compiler.subprocess, 'run', side_effect=run):
+                compiler.render(source / 'sing.jsonnet', {'outbounds': [], 'groups': {'fresh': []}}, scratch)
+                compiler.render(source / 'sing.jsonnet', None, scratch)  # No providers configured.
+            self.assertEqual([s['groups'] for s in seen], [{'fresh': []}, {'static': []}])
+            self.assertEqual(json.loads((source / 'local-subs.json').read_text())['groups'], {'static': []})
+            self.assertEqual(list(scratch.iterdir()), [])
 
     def test_revision_changes_with_same_tag_credentials(self):
         with tempfile.TemporaryDirectory() as temp:
             c = config()
-            (Path(temp) / 'config.jsonnet').write_text(compiler.EXTVAR_LINE)
+            source, scratch = Path(temp) / 'config', Path(temp) / 'scratch'
+            source.mkdir()
             def render(c):
                 with patch.object(compiler.subprocess, 'run', return_value=type('Result', (), {
                         'returncode': 0, 'stdout': json.dumps(c)})()):
-                    return compiler.render(Path(temp) / 'sing.jsonnet', {}, temp)
+                    return compiler.render(source / 'sing.jsonnet', {}, scratch)
             first = render(c)
             self.assertEqual(first, render(c))
             c['experimental']['clash_api']['secret'] = 'rotated'
             self.assertNotEqual(compiler.revision(first), compiler.revision(render(c)))
-            self.assertEqual([p.name for p in Path(temp).iterdir()], ['config.jsonnet'])
+            self.assertEqual(list(scratch.iterdir()), [])
 
     def test_settings_observe_only_guards(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -290,7 +290,7 @@ class Manager:
             pending = None
             try:
                 providers = Providers(self.config_dir, self.root, self.settings, log)
-                if providers.snapshots:
+                if providers.snapshots or not providers.configured:
                     pending = dict(providers.snapshots)
                     self.activate_and_configure(self.prepare(pending, providers), providers, pending)
                     pending = None
@@ -320,7 +320,7 @@ class Manager:
                         if pending is None:
                             pending = dict(providers.snapshots) if reload_only else providers.refresh()
                             fetched = not reload_only
-                        if not pending:
+                        if not pending and providers.configured:
                             log('bootstrap_waiting_for_providers')
                             pending = None
                             next_refresh = now + backoff
