@@ -13,12 +13,10 @@ FRESH_SAMPLE_SECONDS = 30
 INSPECT_SECONDS = 5
 SUMMARY_SECONDS = 3600
 SCHEDULER_ERROR_LOG_SECONDS = 60
-GATE_FAILURE_THRESHOLD = 3
 # Policy invariants, deliberately fixed rather than operator-tunable cadences.
 HOLD = 300
 MARGIN = 1.15
 DEFAULT_PROBE_URL = 'https://speed.cloudflare.com/__down?bytes={bytes}'
-DEFAULT_BACKUP_URL = 'https://proof.ovh.net/files/1Mb.dat'
 
 
 @dataclass(frozen=True)
@@ -46,7 +44,6 @@ class Settings(Mapping):
     provider_weights: Mapping[str, float] = field(default_factory=dict)
     selector_priorities: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
     probe_url: str = DEFAULT_PROBE_URL
-    probe_backup_url: str = DEFAULT_BACKUP_URL
     probe_ca_bundle: str | None = None
 
     def __post_init__(self):
@@ -121,18 +118,15 @@ def load_settings(config_dir):
         raise ValueError('probe_port and clash_api_port must differ')
     if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
         raise ValueError('probe deadlines exceed bounded maximum')
-    for key in ('probe_url', 'probe_backup_url'):
-        if key in settings and not isinstance(settings[key], str):
-            raise ValueError('invalid probe URL')
+    if 'probe_url' in settings and not isinstance(settings['probe_url'], str):
+        raise ValueError('invalid probe URL')
     if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
         raise ValueError('probe_ca_bundle must be a file path')
     if settings.get('probes_enabled', False):
         ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
-        for key, default in (('probe_url', DEFAULT_PROBE_URL),
-                             ('probe_backup_url', DEFAULT_BACKUP_URL)):
-            url = urlsplit(settings.get(key, default))
-            if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
-                raise ValueError('probe endpoint must be HTTPS')
+        url = urlsplit(settings.get('probe_url', DEFAULT_PROBE_URL))
+        if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
+            raise ValueError('probe endpoint must be HTTPS')
         if '{bytes}' not in settings.get('probe_url', '{bytes}'):
             raise ValueError('probe_url requires {bytes}')
     return Settings.from_mapping(settings)

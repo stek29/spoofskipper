@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler, clash_api
+from spoofskipper_manager.identity import Candidate, SampleKey
 from spoofskipper_manager.policy import Policy
 from spoofskipper_manager.probes import DEFAULTS, sample_key
 from spoofskipper_manager.scheduler import Health, Scheduler, Sample
@@ -17,18 +18,18 @@ from spoofskipper_manager.state import write_json
 
 class GenericPolicyTests(unittest.TestCase):
     def test_three_configured_tiers_and_unconfigured_score_policy(self):
-        candidates = {(x, x): {'provider': x, 'weight': 1} for x in ('first', 'second', 'third')}
+        candidates = {SampleKey(x, x): Candidate({}, x) for x in ('first', 'second', 'third')}
         samples = {k: Sample(health=Health.HEALTHY, healthy_at=1000, latency=20,
                             successes=[(1000, 1 if k[0] == 'first' else 50, 20)]) for k in candidates}
         settings = {**DEFAULTS, 'selector_priorities': {'arbitrary': [['first'], ['second'], ['third']]}}
         policy = Policy()
         decide = lambda: policy.decide('arbitrary', 'third', candidates, samples, 1000, settings, ['first', 'second', 'third'])
         self.assertEqual(decide().reason, 'hold')
-        samples[('third', 'third')].health = Health.FAILED_GATE
+        samples[('third', 'third')].health = Health.FAILED
         self.assertEqual(decide().target, ('first', 'first'))
         samples[('first', 'first')].health = Health.UNKNOWN
         self.assertEqual(decide().reason, 'priority_health_unknown')
-        samples[('first', 'first')].health = Health.FAILED_GATE
+        samples[('first', 'first')].health = Health.FAILED
         self.assertEqual(decide().target, ('second', 'second'))
         settings.pop('selector_priorities')
         self.assertEqual(decide().target, ('second', 'second'))
@@ -48,7 +49,7 @@ class GenericPolicyTests(unittest.TestCase):
         try:
             scheduler.configure(config, [], settings)
             self.assertEqual({k[0] for k in scheduler.candidates}, {'one', 'two', 'chained-a', 'chained-b'})
-            self.assertEqual(scheduler.candidates[sample_key(config['outbounds'][4])]['weight'], 2.5)
+            self.assertEqual(scheduler.candidates[sample_key(config['outbounds'][4])].weight, 2.5)
             compiler.handoff_selectors(copy.deepcopy(config), ['arbitrary'], [])
             with patch.object(clash_api, 'proxies', return_value=api):
                 scheduler.controller.inspect()

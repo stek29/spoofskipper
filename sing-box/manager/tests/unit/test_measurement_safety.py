@@ -7,7 +7,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler, service
-from spoofskipper_manager.scheduler import Scheduler
+from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
+from spoofskipper_manager.scheduler import Health, Scheduler
 from spoofskipper_manager.state import write_json
 
 
@@ -27,18 +28,14 @@ class MeasurementSafetyTests(unittest.TestCase):
     def tearDown(self):
         self.scheduler.close()
 
-    def test_backup_head_without_latency_can_be_ranked_and_scheduled(self):
+    def test_path_without_latency_can_be_ranked_and_scheduled(self):
         scheduler = self.scheduler
         for key in self.keys[:3]:
-            scheduler.accept(key, 'gate', {'ok': True, 'latency_ms': 50, 'bytes': 1}, 1000)
-            scheduler.accept(key, 'throughput', {'ok': True, 'latency_ms': 50,
-                             'mbps': 20, 'bytes': 5000000}, 1000)
+            scheduler.accept(key, ProbeResult(Probe.GATE, ok=True, latency_ms=50, bytes=1), 1000)
+            scheduler.accept(key, ProbeResult(Probe.THROUGHPUT, ok=True, latency_ms=50,
+                             mbps=20, bytes=5000000), 1000)
         key = self.keys[3]
-        for _ in range(3):
-            scheduler.accept(key, 'gate', {'ok': False, 'latency_ms': None, 'bytes': 0}, 1000)
-        self.assertEqual(scheduler.samples[key].corroborate, 'corroborate_gate')
-        scheduler.samples[key].corroborate = None
-        scheduler.accept(key, 'corroborate_gate', {'ok': True}, 1000)
+        scheduler.accept(key, ProbeResult(Probe.THROTTLE, ok=True, bytes=THROTTLE), 1000)
         scheduler.samples[key].last['gate'] = 1000
         self.assertTrue(scheduler.samples[key].healthy)
         self.assertIsNone(scheduler.samples[key].latency)
@@ -52,9 +49,10 @@ class MeasurementSafetyTests(unittest.TestCase):
 
     def test_two_unknown_throughput_results_use_sweep_cadence(self):
         scheduler, key = self.scheduler, self.keys[0]
-        for at in (1000, 2800):
-            scheduler.accept(key, 'throughput', {'ok': True, 'bytes': 1, 'latency_ms': 10}, at)
         sample = scheduler.samples[key]
+        sample.health, sample.healthy_at = Health.HEALTHY, 1000
+        for at in (1000, 2800):
+            scheduler.accept(key, ProbeResult(Probe.THROUGHPUT, ok=True, bytes=1, latency_ms=10), at)
         sample.last.update(gate=4600, throughput=2800)
         self.assertIsNone(scheduler.next_test(key, [], 4600))
         sample.last['gate'] = 2800 + scheduler.settings['throughput_sweep_seconds']

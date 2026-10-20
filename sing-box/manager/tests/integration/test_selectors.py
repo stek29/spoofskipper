@@ -158,7 +158,7 @@ class SelectorIntegrationTests(unittest.TestCase):
                     scheduler.controller.inspect()
                     now = scheduler.clock()
                     for key in scheduler.samples:
-                        scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] != 'b' else Health.FAILED_GATE, healthy_at=now,
+                        scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] != 'b' else Health.FAILED, healthy_at=now,
                             latency=20, successes=[(now, 20, 20)])
                     with patch.object(scheduler.pool, 'submit') as submit:
                         scheduler.controller.apply_policy(now)

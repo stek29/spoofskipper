@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
-from spoofskipper_manager.probes import Accounting, sample_key
+from spoofskipper_manager.identity import Candidate
+from spoofskipper_manager.probes import SKIP, THROTTLE, Accounting, Probe, ProbeResult, sample_key
 from spoofskipper_manager.scheduler import Health, Scheduler, Sample
 from spoofskipper_manager.policy import score
 
@@ -35,7 +36,12 @@ class SchedulingTests(unittest.TestCase):
     def complete(self, **extra):
         for future, args in self.submissions:
             if not future.done():
-                future.set_result(({'ok': True, 'kind': args[-1], 'bytes': 1, 'latency_ms': 30, **extra}, True))
+                probe = Probe(args[-1])
+                size = {Probe.GATE: 1, Probe.THROTTLE: THROTTLE, Probe.THROUGHPUT: THROTTLE + SKIP}[probe]
+                fields = {'bytes': size, 'latency_ms': 30, **extra}
+                if probe is not Probe.THROUGHPUT:
+                    fields.pop('mbps', None)
+                future.set_result((ProbeResult(probe, ok=True, **fields), True))
 
     def test_bounded_gates_dedup_and_no_catchup(self):
         self.scheduler.tick()
@@ -88,7 +94,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(len(peers), 3)
         self.scheduler.tick()
         self.assertEqual(len(self.scheduler.jobs), 0)  # no full-pool startup downloads
-        self.scheduler.samples[peers[0]].health = Health.SUSPECT_BODY
+        self.scheduler.samples[peers[0]].health = Health.FAILED
         self.scheduler.samples[peers[0]].last['throttle'] = self.now
         self.scheduler.tick()
         self.assertEqual(len(self.scheduler.jobs), 1)  # latency-ranked replacement
@@ -100,35 +106,42 @@ class SchedulingTests(unittest.TestCase):
         self.assertIsNotNone(score(sample, 1, self.now, 7200))
         self.assertIsNone(score(sample, 1, self.now+7201, 7200))
 
-    def test_failure_corroboration_and_tiny_success(self):
+    def test_failure_confirmation_is_scheduled_first_and_survives_cancellation(self):
         key = next(iter(self.scheduler.samples))
-        failure = {'ok': False, 'bytes': 0}
-        for _ in range(2):
-            self.scheduler.accept(key, 'gate', failure, self.now)
         sample = self.scheduler.samples[key]
-        self.assertIsNone(sample.corroborate)
-        self.scheduler.accept(key, 'gate', failure, self.now)
-        self.assertEqual(sample.corroborate, 'corroborate_gate')
-        self.scheduler.accept(key, 'corroborate_gate', failure, self.now)
+        sample.health, sample.healthy_at = Health.HEALTHY, self.now
+        sample.last.update(gate=self.now, throttle=self.now, throughput=self.now)
+        self.scheduler.accept(key, ProbeResult(Probe.THROTTLE, error='TimeoutError'), self.now)
+        self.assertEqual(self.scheduler.next_test(key, [], self.now), Probe.THROTTLE)
+        self.scheduler.tick()
+        self.assertIn((key, Probe.THROTTLE, self.scheduler.epoch), self.scheduler.jobs.values())
+        self.assertIsNone(sample.confirm)
+        self.scheduler.invalidate()  # A reload cancels the confirmation; it is re-armed.
+        self.assertEqual(sample.confirm, Probe.THROTTLE)
+        self.scheduler.accept(key, ProbeResult(Probe.THROTTLE, error='TimeoutError'), self.now)
         self.assertFalse(sample.healthy)
-        self.scheduler.accept(key, 'throttle', failure, self.now)
-        self.scheduler.accept(key, 'gate', {'ok': True}, self.now)
-        self.assertTrue(sample.body_failed)
-        self.scheduler.accept(key, 'corroborate_body', {'ok': True}, self.now)
-        self.assertTrue(sample.body_failed)
-        self.scheduler.accept(key, 'throttle', {'ok': True}, self.now)
-        self.assertFalse(sample.body_failed)
         self.assertIsNone(score(sample, 1, self.now, 7200))
+
+    def test_failed_path_rechecks_threshold_once_per_gate_success(self):
+        key = next(iter(self.scheduler.samples))
+        sample = self.scheduler.samples[key]
+        sample.health, sample.failures = Health.FAILED, 2
+        sample.last.update(gate=self.now, throttle=self.now)
+        self.assertIsNone(self.scheduler.next_test(key, [], self.now))
+        self.scheduler.accept(key, ProbeResult(Probe.GATE, ok=True, bytes=1), self.now + 1)
+        self.assertEqual(self.scheduler.next_test(key, [], self.now + 1), Probe.THROTTLE)
+        sample.last[Probe.THROTTLE] = self.now + 1
+        self.assertIsNone(self.scheduler.next_test(key, [], self.now + 2))
 
     def test_chained_changed_upstream_discards(self):
         class Client:
             def run(self, *_):
-                return {'ok': True}
+                return ProbeResult(Probe.GATE, ok=True)
         config = {'outbounds': [{'type': 'direct', 'tag': tag} for tag in ('a', 'b')] +
                   [{'type': 'selector', 'tag': 'chained_upstream', 'outbounds': ['a', 'b']}]}
         with patch('spoofskipper_manager.scheduler.clash_api.proxies', side_effect=[{'chained_upstream': {'now': 'a'}}, {'chained_upstream': {'now': 'b'}}]):
             config['endpoints'] = [{'type': 'wireguard', 'tag': 'tunnel', 'detour': 'chained_upstream'}]
-            _, valid = self.scheduler.perform(Client(), config, {'provider': 'tunnel', 'outbound': config['endpoints'][0]}, 'gate')
+            _, valid = self.scheduler.perform(Client(), config, Candidate(config['endpoints'][0], 'tunnel'), Probe.GATE)
         self.assertFalse(valid)
 
     def test_accounting_period_reset_preserves_day_total(self):

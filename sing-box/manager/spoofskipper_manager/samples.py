@@ -1,0 +1,78 @@
+"""Per-path measurement evidence and its health transitions; no I/O."""
+from dataclasses import dataclass, field
+from enum import Enum
+
+from .probes import Probe
+
+# A failure is confirmed by an immediate repeat of the same probe kind.
+FAILURES_TO_FAIL = 2
+
+
+class Health(Enum):
+    UNKNOWN = 'unknown'
+    HEALTHY = 'healthy'  # passed the throttling threshold and is still reachable
+    FAILED = 'failed'    # failed twice in a row
+
+
+@dataclass
+class Sample:
+    latency: float | None = None
+    health: Health = Health.UNKNOWN
+    healthy_at: float = float('-inf')  # last success while healthy
+    failed_at: float = float('-inf')   # when the path last became failed
+    reachable_at: float = float('-inf')  # last gate success, healthy or not
+    failures: int = 0
+    failed_probe: Probe | None = None  # kind of the latest failure
+    confirm: Probe | None = None  # repeat this probe now to confirm a failure
+    unknown_throughput: int = 0
+    successes: list[tuple[float, float, float]] = field(default_factory=list)  # (at, mbps, latency)
+    last: dict[Probe, float] = field(default_factory=dict)  # submission times
+
+    @property
+    def healthy(self):
+        return {Health.HEALTHY: True, Health.FAILED: False}.get(self.health)
+
+    @property
+    def latency_or_inf(self):
+        return self.latency if self.latency is not None else float('inf')
+
+    @property
+    def throughput_at(self):
+        return self.successes[-1][0] if self.successes else float('-inf')
+
+    def is_healthy(self, now, max_age):
+        return self.health is Health.HEALTHY and 0 <= now-self.healthy_at <= max_age
+
+    def scored(self, now, max_age):
+        if self.health is not Health.HEALTHY:
+            return []
+        return [(rate, latency) for at, rate, latency in self.successes if 0 <= now-at <= max_age]
+
+    def record(self, result, now):
+        probe = result.probe
+        if result.latency_ms is not None:
+            self.latency = result.latency_ms
+        if probe is Probe.THROUGHPUT:
+            self.unknown_throughput = 0 if result.mbps is not None else self.unknown_throughput + 1
+        if not result.ok:
+            self.failures, self.failed_probe = self.failures + 1, probe
+            if self.failures < FAILURES_TO_FAIL:
+                self.confirm = probe
+            elif self.health is not Health.FAILED:
+                self.health, self.failed_at = Health.FAILED, now
+            return
+        if probe is Probe.GATE:
+            self.reachable_at = now
+            # A tiny response says nothing about throttling: it clears only gate
+            # failures and keeps proven health fresh, but cannot make an unknown
+            # or failed path healthy.
+            if self.failed_probe is Probe.GATE and self.health is not Health.FAILED:
+                self.failures = 0
+            if self.health is Health.HEALTHY:
+                self.healthy_at = now
+            return
+        if not result.passed_threshold:
+            return  # Slow but alive within the time box: no new evidence.
+        self.failures, self.health, self.healthy_at = 0, Health.HEALTHY, now
+        if result.mbps is not None:
+            self.successes = (self.successes + [(now, result.mbps, self.latency)])[-3:]

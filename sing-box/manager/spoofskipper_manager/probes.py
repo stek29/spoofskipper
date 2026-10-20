@@ -1,21 +1,60 @@
 """Bounded HTTPS measurements using the standard-library CONNECT/HTTP client."""
 import base64
 from collections import Counter
+from dataclasses import asdict, dataclass
+from enum import Enum
 import http.client
 import io
-import re
 import socket
 import ssl
 import threading
 import time
 from urllib.parse import urlsplit
 
-GATE, THROTTLE, SKIP, TOTAL = 1, 256 * 1024, 512 * 1024, 8 * 1024 * 1024
-from .identity import identity, sample_key
+from .identity import identity, sample_key  # noqa: F401 (sample_key is re-exported)
 from .settings import Settings, NUMERIC_DEFAULTS
 
 # Kept as a numeric defaults mapping for public measurement/test helpers.
 DEFAULTS = NUMERIC_DEFAULTS
+
+# Throttling middleboxes let small responses through and stall the connection
+# after a few dozen KiB, so health is proven only past THROTTLE bytes.
+THROTTLE, SKIP, TOTAL = 256 * 1024, 512 * 1024, 8 * 1024 * 1024
+
+
+class Probe(str, Enum):
+    """One request per probe; the kinds differ only in their byte budget."""
+    GATE = 'gate'              # 1 byte: reachability and latency
+    THROTTLE = 'throttle'      # 256 KiB: the connection survives the threshold
+    THROUGHPUT = 'throughput'  # up to 8 MiB: rate after the first 512 KiB
+
+    @property
+    def budget(self):
+        return {Probe.GATE: 1, Probe.THROTTLE: THROTTLE, Probe.THROUGHPUT: TOTAL}[self]
+
+
+@dataclass
+class ProbeResult:
+    probe: Probe
+    ok: bool = False
+    bytes: int = 0
+    skipped: int = 0
+    seconds: float = 0
+    latency_ms: float | None = None
+    burst_seconds: float | None = None
+    mbps: float | None = None
+    early_stop: bool = False
+    status: int | None = None
+    error: str | None = None
+    completed_at: float | None = None
+
+    @property
+    def passed_threshold(self):
+        """A completed body probe that read past the throttling threshold."""
+        return self.ok and self.probe is not Probe.GATE and self.bytes >= THROTTLE
+
+    def fields(self):
+        return {k: v for k, v in asdict(self).items() if v is not None and k != 'completed_at'}
 
 
 class Accounting:
@@ -116,18 +155,14 @@ class _Connection(http.client.HTTPSConnection):
             view = view[sent:]
 
 
-def validate_response(response, expected, ranged, head):
+def validate_response(response, expected):
     # http.client handles framing; only reject what would distort the measurement.
     if response.getheader('Content-Encoding', 'identity').lower() != 'identity':
         raise ValueError('encoded body')
-    length = response.length  # Parsed by http.client before any body is read; None if chunked.
-    if ranged and response.status == 206:
-        match = re.fullmatch(r'bytes 0-262143/(\d+)', response.getheader('Content-Range', ''))
-        if not match or int(match[1]) < THROTTLE or (length is not None and length != THROTTLE):
-            raise ValueError('invalid backup range')
-    elif response.status != 200:
+    if response.status != 200:
         raise ValueError('unexpected status')
-    elif not head and length is not None and (length < expected if ranged else length != expected):
+    length = response.length  # Parsed by http.client before any body is read; None if chunked.
+    if length is not None and length != expected:
         raise ValueError('unexpected body length')
 
 
@@ -135,7 +170,7 @@ class ProbeClient:
     def __init__(self, settings, accounting=None, clock=time.monotonic):
         self.settings, self.clock = Settings.from_mapping(settings), clock
         self.accounting = accounting or Accounting()
-        self.context = ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
+        self.context = ssl.create_default_context(cafile=self.settings.probe_ca_bundle)
         self.cancelled = threading.Event()
         self.lock, self.connections = threading.Lock(), set()
 
@@ -149,15 +184,17 @@ class ProbeClient:
                     except OSError:
                         pass
 
-    def request(self, outbound, url, kind, backup=False, head=False):
+    def run(self, outbound, probe):
+        probe = Probe(probe)
         started = self.clock()
-        duration = self.settings['throughput_seconds'] if kind == 'throughput' else self.settings['probe_timeout']
+        duration = self.settings.throughput_seconds if probe is Probe.THROUGHPUT else self.settings.probe_timeout
+        expected = probe.budget
         connection = response = None
-        body = skipped = 0
-        burst = post_started = None
-        result = {'kind': kind, 'ok': False, 'backup': backup}
+        body = 0
+        post_started = burst = None
+        result = ProbeResult(probe)
         try:
-            target = urlsplit(url)
+            target = urlsplit(self.settings.probe_url.replace('{bytes}', str(expected)))
             if target.scheme != 'https' or not target.hostname or target.username or target.fragment:
                 raise ValueError('HTTPS endpoint required')
             connection = _Connection(self, started + duration)
@@ -166,51 +203,42 @@ class ProbeClient:
                 'Proxy-Authorization': 'Basic ' + base64.b64encode(f'{user}:{password}'.encode()).decode()})
             with self.lock:
                 self.connections.add(connection)
-            path = target.path or '/'
-            if target.query:
-                path += '?' + target.query
-            ranged = backup and not head
-            headers = {'Accept-Encoding': 'identity', 'Connection': 'close'}
-            if ranged:
-                headers['Range'] = 'bytes=0-262143'
-            connection.request('HEAD' if head else 'GET', path, headers=headers)
+            path = (target.path or '/') + ('?' + target.query if target.query else '')
+            connection.request('GET', path, headers={'Accept-Encoding': 'identity', 'Connection': 'close'})
             response = connection.getresponse()
-            result.update(status=response.status, content_length=response.getheader('Content-Length'),
-                          framing=response.getheader('Transfer-Encoding'))
-            expected = {'gate': GATE, 'throttle': THROTTLE, 'throughput': TOTAL}[kind]
-            validate_response(response, expected, ranged, head)
-            connection.stall = self.settings['probe_stall_timeout']
-            early = False
-            while not head and body < expected:
+            result.status = response.status
+            validate_response(response, expected)
+            connection.stall = self.settings.probe_stall_timeout
+            while body < expected:
                 try:
                     data = response.read1(min(16384, expected-body))
                 except TimeoutError:
-                    if kind == 'throughput' and body and self.clock() >= connection.deadline:
-                        early = True
+                    # Throughput is time-boxed: reaching the deadline mid-body ends the sample.
+                    if probe is Probe.THROUGHPUT and body and self.clock() >= connection.deadline:
+                        result.early_stop = True
                         break
                     raise
                 if not data:
                     raise ValueError('truncated body')
-                before, body = body, body + len(data)
+                body += len(data)
                 if burst is None and body >= 16384:
                     burst = self.clock() - connection.first_byte
-                if kind == 'throughput':
-                    skipped += min(body, SKIP) - min(before, SKIP)
+                if probe is Probe.THROUGHPUT:
                     if body >= SKIP and post_started is None:
                         post_started = self.clock()
                     scored = body - SKIP
                     elapsed = self.clock() - post_started if post_started is not None else 0
                     if scored >= 4*1024*1024 or (scored >= THROTTLE and elapsed > 0 and scored*8/elapsed/1e6 > 50):
-                        early = True
+                        result.early_stop = True
                         break
-            if not head and not ranged and not early and response.read1(1):
+            if not result.early_stop and response.read1(1):
                 body += 1
                 raise ValueError('oversized body')
-            result.update(ok=True, early_stop=early)
-            if kind == 'throughput' and body-SKIP >= THROTTLE:
-                result['mbps'] = (body-SKIP)*8/max(self.clock()-post_started, .000001)/1e6
+            result.ok = True
+            if probe is Probe.THROUGHPUT and body-SKIP >= THROTTLE:
+                result.mbps = (body-SKIP)*8/max(self.clock()-post_started, .000001)/1e6
         except (OSError, ValueError, http.client.HTTPException) as exc:
-            result['error'] = type(exc).__name__
+            result.error = type(exc).__name__
         finally:
             if response:
                 response.close()
@@ -219,20 +247,11 @@ class ProbeClient:
                 with self.lock:
                     self.connections.discard(connection)
             first = connection.first_byte if connection else None
-            result.update(bytes=body, skipped=skipped, seconds=self.clock()-started,
-                          latency_ms=(first-started)*1000 if first is not None else None, burst_seconds=burst)
+            result.bytes, result.skipped = body, min(body, SKIP) if probe is Probe.THROUGHPUT else 0
+            result.seconds = self.clock() - started
+            result.latency_ms = (first-started)*1000 if first is not None else None
+            result.burst_seconds = burst
             # Socket-level sent/received bytes are counted as they happen; the rest once here.
-            self.accounting.add(probes=1, partial=int(not result['ok']), corroboration=int(backup),
-                                early_stops=int(result.get('early_stop', False)),
-                                body_received=body, skipped=skipped)
+            self.accounting.add(probes=1, partial=int(not result.ok), early_stops=int(result.early_stop),
+                                body_received=body, skipped=result.skipped)
         return result
-
-    def run(self, outbound, kind):
-        size = {'gate': GATE, 'throttle': THROTTLE, 'throughput': TOTAL}[kind]
-        url = self.settings.probe_url.replace('{bytes}', str(size))
-        return self.request(outbound, url, kind)
-
-    def corroborate(self, outbound, body=False):
-        url = self.settings.probe_backup_url
-        result = self.request(outbound, url, 'gate', backup=True, head=True)
-        return self.request(outbound, url, 'throttle', backup=True) if body and result['ok'] else result

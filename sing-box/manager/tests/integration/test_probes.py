@@ -26,17 +26,12 @@ class ProbeIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.mode, self.served, self.heads, self.ranges = 'ok', 0, 0, []
+        self.mode, self.served = 'ok', 0
         owner = self
         class Endpoint(http.server.BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
             def log_message(self, *_):
                 pass
-            def do_HEAD(self):
-                owner.heads += 1
-                self.send_response(503 if owner.mode == 'backup_fail' else 200)
-                self.send_header('Content-Length', str(1024*1024))
-                self.end_headers()
             def do_GET(self):
                 if owner.mode == 'slow_headers':
                     try:
@@ -47,17 +42,11 @@ class ProbeIntegrationTests(unittest.TestCase):
                     except OSError:
                         pass
                     return
-                backup = self.path.startswith('/backup')
-                size = 1024*1024 if backup else int(parse_qs(urlsplit(self.path).query)['bytes'][0])
-                range_header = self.headers.get('Range')
-                if range_header:
-                    owner.ranges.append(range_header)
-                    if owner.mode != 'ignore_range':
-                        size = THROTTLE
+                size = int(parse_qs(urlsplit(self.path).query)['bytes'][0])
                 chunked = owner.mode.startswith('chunked') or owner.mode == 'ambiguous_framing'
                 if owner.mode == 'chunked_oversize':
                     size += 1
-                self.send_response(206 if range_header and owner.mode != 'ignore_range' else 200)
+                self.send_response(200)
                 if chunked:
                     self.send_header('Transfer-Encoding', 'chunked')
                 if not chunked or owner.mode == 'ambiguous_framing':
@@ -71,8 +60,6 @@ class ProbeIntegrationTests(unittest.TestCase):
                     self.send_header('Content-Length', str(size))
                 if owner.mode == 'encoded':
                     self.send_header('Content-Encoding', 'gzip')
-                if range_header and owner.mode != 'ignore_range':
-                    self.send_header('Content-Range', 'bytes 0-262143/1048576' if owner.mode != 'bad_range' else 'bytes 1-262144/1048576')
                 self.end_headers()
                 try:
                     for offset in range(0, size, 16384):
@@ -103,8 +90,7 @@ class ProbeIntegrationTests(unittest.TestCase):
         self.port = free_port()
         self.settings = {'probe_port': self.port, 'probe_timeout': .45, 'probe_stall_timeout': .15,
                          'throughput_seconds': 2, 'probe_ca_bundle': str(FIXTURES/'probe-ca.pem'),
-                         'probe_url': f'https://localhost:{self.server.server_port}/__down?bytes={{bytes}}',
-                         'probe_backup_url': f'https://localhost:{self.server.server_port}/backup'}
+                         'probe_url': f'https://localhost:{self.server.server_port}/__down?bytes={{bytes}}'}
         relay_port = free_port()
         self.core({'log': {'disabled': True}, 'inbounds': [{'type': 'socks',
             'listen': '127.0.0.1', 'listen_port': relay_port}],
@@ -159,11 +145,11 @@ class ProbeIntegrationTests(unittest.TestCase):
         self.client = ProbeClient(self.settings)
 
     def test_exact_gate_throttle_and_application_accounting(self):
-        self.assertTrue(self.client.run(self.outbound, 'gate')['ok'])
+        self.assertTrue(self.client.run(self.outbound, 'gate').ok)
         result = self.client.run(self.outbound, 'throttle')
-        self.assertTrue(result['ok'], result)
-        self.assertEqual(result['bytes'], THROTTLE)
-        self.assertIsNotNone(result['burst_seconds'])
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.bytes, THROTTLE)
+        self.assertIsNotNone(result.burst_seconds)
         counts = self.client.accounting.summary()['today']
         self.assertEqual(counts['body_received'], 1+THROTTLE)
         self.assertEqual(self.served, 1+THROTTLE)
@@ -194,44 +180,45 @@ class ProbeIntegrationTests(unittest.TestCase):
             scheduler.controller.inspect()
             result, valid = scheduler.perform(scheduler.client, config, scheduler.candidates[key], 'throttle')
             self.assertTrue(valid)
-            self.assertTrue(result['ok'], result)
-            scheduler.accept(key, 'throttle', result, time.monotonic())
+            self.assertTrue(result.ok, result)
+            scheduler.accept(key, result, time.monotonic())
             self.assertTrue(scheduler.samples[key].healthy)
             clash_api.select(config, 'hop', 'offline', ['hop'])
             scheduler.controller.inspect()
             self.assertIsNone(scheduler.samples[key].healthy)
             result, valid = scheduler.perform(scheduler.client, config, scheduler.candidates[key], 'gate')
             self.assertTrue(valid)
-            self.assertFalse(result['ok'])
+            self.assertFalse(result.ok)
             clash_api.select(config, 'hop', 'candidate', ['hop'])
             scheduler.controller.inspect()
-            self.assertTrue(scheduler.client.run(chained, 'gate')['ok'])
+            self.assertTrue(scheduler.client.run(chained, 'gate').ok)
         finally:
             scheduler.close()
 
-    def test_confirmed_body_failure_survives_real_head_success(self):
+    def test_throttled_path_fails_and_only_a_threshold_probe_restores_it(self):
         from spoofskipper_manager.scheduler import Scheduler
         from spoofskipper_manager.probes import sample_key
         scheduler = Scheduler(lambda *args, **kw: None)
         scheduler.configure(self.config, [{'provider': 'p', 'weight': 1, 'outbound': self.outbound}],
                             {**self.settings, 'probes_enabled': True})
         key = sample_key(self.outbound)
+        sample = scheduler.samples[key]
         try:
-            self.mode = 'freeze'
-            scheduler.accept(key, 'throttle', self.client.run(self.outbound, 'throttle'), time.monotonic())
-            scheduler.accept(key, 'corroborate_body', self.client.corroborate(self.outbound, body=True), time.monotonic())
-            self.assertFalse(scheduler.samples[key].healthy)
-            self.mode = 'stall'
-            for _ in range(3):
-                scheduler.accept(key, 'gate', self.client.run(self.outbound, 'gate'), time.monotonic())
-            result = self.client.corroborate(self.outbound)
-            self.assertTrue(result['ok'])
-            scheduler.accept(key, 'corroborate_gate', result, time.monotonic())
-            self.assertFalse(scheduler.samples[key].healthy)
             self.mode = 'ok'
-            scheduler.accept(key, 'corroborate_body', self.client.corroborate(self.outbound, body=True), time.monotonic())
-            self.assertTrue(scheduler.samples[key].healthy)
-            self.assertTrue(scheduler.samples[key].body_failed)
+            scheduler.accept(key, self.client.run(self.outbound, 'throttle'), time.monotonic())
+            self.assertTrue(sample.healthy)
+            self.mode = 'freeze'  # Small responses pass; the body stalls after 16 KiB.
+            scheduler.accept(key, self.client.run(self.outbound, 'throttle'), time.monotonic())
+            self.assertEqual(sample.confirm, 'throttle')
+            scheduler.accept(key, self.client.run(self.outbound, 'throttle'), time.monotonic())
+            self.assertFalse(sample.healthy)
+            result = self.client.run(self.outbound, 'gate')
+            self.assertTrue(result.ok)
+            scheduler.accept(key, result, time.monotonic())
+            self.assertFalse(sample.healthy)
+            self.mode = 'ok'
+            scheduler.accept(key, self.client.run(self.outbound, 'throttle'), time.monotonic())
+            self.assertTrue(sample.healthy)
         finally:
             scheduler.close()
 
@@ -263,10 +250,10 @@ class ProbeIntegrationTests(unittest.TestCase):
             self.assertEqual(manager.scheduler.config, new)
             self.assertFalse(manager.scheduler.client.cancelled.is_set())
             self.assertIn(compiler.revision(new), manager.scheduler.controller.inspect())
-            result = manager.scheduler.client.run(self.outbound, 'gate')
-            self.assertTrue(result['ok'], result)
+            result = manager.scheduler.client.run(self.outbound, 'throttle')
+            self.assertTrue(result.ok, result)
             key = sample_key(self.outbound)
-            manager.scheduler.accept(key, 'gate', result, time.monotonic())
+            manager.scheduler.accept(key, result, time.monotonic())
             self.assertTrue(manager.scheduler.samples[key].healthy)
             tested = True
         def checked_tick():
@@ -293,44 +280,31 @@ class ProbeIntegrationTests(unittest.TestCase):
         for mode in ('freeze', 'truncate'):
             self.mode = mode
             result = self.client.run(self.outbound, 'throttle')
-            self.assertFalse(result['ok'], result)
-            self.assertEqual(result['bytes'], 16384)
-            self.assertIsNotNone(result['burst_seconds'])
+            self.assertFalse(result.ok, result)
+            self.assertEqual(result.bytes, 16384)
+            self.assertIsNotNone(result.burst_seconds)
         self.mode = 'slow'
         result = self.client.run(self.outbound, 'throttle')
-        self.assertTrue(result['ok'], result)
+        self.assertTrue(result.ok, result)
         self.mode = 'ok'
         before = self.served
         result = self.client.run(self.outbound, 'throughput')
-        self.assertTrue(result['ok'], result)
-        self.assertTrue(result['early_stop'])
-        self.assertEqual(result['skipped'], SKIP)
-        self.assertGreater(result['mbps'], 0)
-        self.assertLessEqual(result['bytes'], SKIP+4*1024*1024)
+        self.assertTrue(result.ok, result)
+        self.assertTrue(result.early_stop)
+        self.assertEqual(result.skipped, SKIP)
+        self.assertGreater(result.mbps, 0)
+        self.assertLessEqual(result.bytes, SKIP+4*1024*1024)
         # Served bytes can include kernel/TLS buffers after the intentional close.
         time.sleep(.05)
         self.assertLessEqual(self.served-before, TOTAL)
-        self.assertGreaterEqual(self.served-before, result['bytes'])
-
-    def test_backup_head_range_ignored_range_and_failed_corroboration(self):
-        for mode in ('ok', 'ignore_range'):
-            self.mode = mode
-            result = self.client.corroborate(self.outbound, body=True)
-            self.assertTrue(result['ok'], result)
-            self.assertEqual(result['bytes'], THROTTLE)
-        self.assertEqual(self.heads, 2)
-        self.assertEqual(self.ranges, ['bytes=0-262143']*2)
-        self.mode = 'bad_range'
-        self.assertFalse(self.client.corroborate(self.outbound, body=True)['ok'])
-        self.mode = 'backup_fail'
-        self.assertFalse(self.client.corroborate(self.outbound)['ok'])
+        self.assertGreaterEqual(self.served-before, result.bytes)
 
     def test_unknown_user_rejected_and_no_selector_writes(self):
         with socket.create_connection(('127.0.0.1', self.port)) as sock:
             sock.sendall(b'CONNECT localhost:443 HTTP/1.1\r\nHost: localhost\r\nProxy-Authorization: Basic '+base64.b64encode(b'unknown:unknown')+b'\r\n\r\n')
             self.assertIn(b'407', sock.recv(100))
         self.assertEqual(self.served, 0)
-        self.assertTrue(self.client.run(self.outbound, 'gate')['ok'])
+        self.assertTrue(self.client.run(self.outbound, 'gate').ok)
         self.assertNotIn('selector', json.dumps(self.config))
 
     def test_protocol_attribution_and_stopped_candidate(self):
@@ -369,10 +343,10 @@ class ProbeIntegrationTests(unittest.TestCase):
         for outbound in outbounds:
             with self.subTest(protocol=outbound['type']):
                 result = self.client.run(outbound, 'gate')
-                self.assertTrue(result['ok'], (result, [p.read_text() for p in self.root.glob('*.log')]))
+                self.assertTrue(result.ok, (result, [p.read_text() for p in self.root.glob('*.log')]))
         provider.terminate()
         provider.wait(timeout=3)
-        self.assertFalse(self.client.run(outbounds[0], 'gate')['ok'])
+        self.assertFalse(self.client.run(outbounds[0], 'gate').ok)
 
     def test_scheduler_reload_retention_observation_and_cancellation(self):
         from spoofskipper_manager.scheduler import Scheduler
@@ -410,7 +384,7 @@ class ProbeIntegrationTests(unittest.TestCase):
             start = time.monotonic()
             scheduler.close()
             self.assertLess(time.monotonic()-start, .5)
-            self.assertFalse(future.result()['ok'])
+            self.assertFalse(future.result().ok)
         finally:
             scheduler.close()
 
@@ -419,30 +393,30 @@ class ProbeIntegrationTests(unittest.TestCase):
         for mode in ('encoded', 'stall', 'slow_headers'):
             self.mode = mode
             result = self.client.run(self.outbound, 'gate')
-            self.assertFalse(result['ok'], (mode, result))
-            self.assertEqual(result['bytes'], 0)
+            self.assertFalse(result.ok, (mode, result))
+            self.assertEqual(result.bytes, 0)
         # Redundant framing headers do not distort the body; http.client resolves them.
         for mode in ('duplicate_length', 'ambiguous_framing'):
             self.mode = mode
             result = self.client.run(self.outbound, 'gate')
-            self.assertTrue(result['ok'], (mode, result))
-            self.assertEqual(result['bytes'], 1)
+            self.assertTrue(result.ok, (mode, result))
+            self.assertEqual(result.bytes, 1)
         self.mode = 'ok'
         settings = dict(self.settings)
         del settings['probe_ca_bundle']
         result = ProbeClient(settings).run(self.outbound, 'gate')
-        self.assertFalse(result['ok'])
-        self.assertEqual(result['error'], 'SSLCertVerificationError')
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error, 'SSLCertVerificationError')
 
 
     def test_slow_throughput_with_insufficient_prefix_is_unknown(self):
         self.mode = 'slow'
         self.client.settings = self.client.settings.with_changes(throughput_seconds=.08)
         result = self.client.run(self.outbound, 'throughput')
-        self.assertTrue(result['ok'], result)
-        self.assertTrue(result['early_stop'])
-        self.assertLess(result['bytes'], SKIP)
-        self.assertNotIn('mbps', result)
+        self.assertTrue(result.ok, result)
+        self.assertTrue(result.early_stop)
+        self.assertLess(result.bytes, SKIP)
+        self.assertIsNone(result.mbps)
 
 
     def test_stdlib_chunked_framing_and_keepalive(self):
@@ -450,12 +424,12 @@ class ProbeIntegrationTests(unittest.TestCase):
             self.mode = mode
             for kind, size in (('gate', 1), ('throttle', THROTTLE)):
                 result = self.client.run(self.outbound, kind)
-                self.assertTrue(result['ok'], (mode, result))
-                self.assertEqual(result['bytes'], size)
+                self.assertTrue(result.ok, (mode, result))
+                self.assertEqual(result.bytes, size)
         for mode in ('chunked_truncate', 'chunked_oversize'):
             self.mode = mode
             result = self.client.run(self.outbound, 'gate')
-            self.assertFalse(result['ok'], (mode, result))
+            self.assertFalse(result.ok, (mode, result))
         counts = self.client.accounting.summary()['today']
         self.assertEqual(counts['body_received'], self.served)
 
@@ -479,7 +453,7 @@ class ProbeIntegrationTests(unittest.TestCase):
                     self.assertTrue(accepted.wait(2))
                     started = time.monotonic()
                     client.cancel()
-                    self.assertFalse(future.result(timeout=1)['ok'])
+                    self.assertFalse(future.result(timeout=1).ok)
                     self.assertLess(time.monotonic()-started, .5)
             finally:
                 release.set()

@@ -228,7 +228,7 @@ class Manager:
 
     def activate_and_configure(self, config, providers, snapshots):
         previous_settings = self.scheduler.settings
-        previous_candidates = list(self.scheduler.candidates.values())
+        previous_candidates = list(self.scheduler.configured or [])
         try:
             self.activate(config)
         except ActivationRolledBack:

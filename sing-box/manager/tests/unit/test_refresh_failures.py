@@ -70,7 +70,7 @@ class RefreshFailureTests(unittest.TestCase):
                     else:
                         scheduler.active = {'proxy_main': 'a'}
                         for key in scheduler.samples:
-                            scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] == 'b' else Health.FAILED_GATE, healthy_at=100, latency=20)
+                            scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] == 'b' else Health.FAILED, healthy_at=100, latency=20)
                         scheduler.controller.apply_policy(100)
                     select.assert_not_called()
             def checked_tick():

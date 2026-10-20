@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api, compiler, service
 from spoofskipper_manager.settings import Settings
-from spoofskipper_manager.probes import THROTTLE, sample_key
+from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult, sample_key
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.state import write_json
 
@@ -72,7 +72,7 @@ class DependencyIdentityTests(unittest.TestCase):
         after = copy.deepcopy(self.api)
         after['transport']['now'] = 't2'
         client = Mock()
-        client.run.return_value = {'ok': True}
+        client.run.return_value = ProbeResult(Probe.GATE, ok=True)
         with patch.object(clash_api, 'proxies', side_effect=[self.api, after]):
             _, valid = self.scheduler.perform(client, self.config,
                 self.scheduler.candidates[self.key], 'gate')

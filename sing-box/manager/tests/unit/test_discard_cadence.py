@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import scheduler as scheduling
+from spoofskipper_manager.identity import SampleKey
+from spoofskipper_manager.probes import Probe, ProbeResult
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 
 
@@ -36,7 +38,7 @@ class DiscardCadenceTests(unittest.TestCase):
             return {'upsel': {'now': next(choices)}}
         def run(client, outbound, kind):
             runs.append((outbound['tag'], kind))
-            return {'ok': True, 'bytes': 1, 'latency_ms': 10}
+            return ProbeResult(Probe(kind), ok=True, bytes=1, latency_ms=10)
         def submit(function, *args):
             # Complete real perform() synchronously: deterministic ticks, no sleeps
             # or network, while retaining dependency checks before/after the probe.
@@ -78,17 +80,17 @@ class DiscardCadenceTests(unittest.TestCase):
     def test_flapping_upstream_does_not_repeat_throughput_downloads(self):
         self.exercise(api_down=False, throughput=True)
 
-    def test_ordinary_discard_does_not_rearm_corroboration(self):
+    def test_ordinary_discard_does_not_rearm_confirmation(self):
         scheduler = Scheduler(lambda *args, **kwargs: None)
         try:
-            key = ('candidate', 'hash')
-            scheduler.samples[key] = sample = Sample()
-            sample.last['corroborate_body'] = 1000
+            key = SampleKey('candidate', 'hash')
+            scheduler.samples[key] = sample = Sample(failures=1, failed_probe=Probe.THROTTLE)
+            sample.last[Probe.THROTTLE] = 1000
             future = Future()
-            future.set_result(({'ok': True}, False))
-            scheduler.jobs[future] = key, 'corroborate_body', scheduler.epoch
+            future.set_result((ProbeResult(Probe.THROTTLE, ok=True), False))
+            scheduler.jobs[future] = key, Probe.THROTTLE, scheduler.epoch
             scheduler.collect(1001)
-            self.assertEqual(sample.last['corroborate_body'], 1000)
-            self.assertIsNone(sample.corroborate)
+            self.assertEqual(sample.last[Probe.THROTTLE], 1000)
+            self.assertIsNone(sample.confirm)
         finally:
             scheduler.close()

@@ -1,13 +1,27 @@
 """Stable, secret-safe candidate and probe-user identities."""
+from dataclasses import dataclass
 import hashlib
 import json
+from typing import NamedTuple
+
+
+class SampleKey(NamedTuple):
+    tag: str
+    digest: str  # changes whenever the rendered outbound definition changes
+
+
+@dataclass(frozen=True)
+class Candidate:
+    outbound: dict
+    provider: str
+    weight: float = 1.0
 
 
 def sample_key(outbound):
-    return outbound['tag'], hashlib.sha256(json.dumps(outbound, sort_keys=True,
-        separators=(',', ':')).encode()).hexdigest()
+    return SampleKey(outbound['tag'], hashlib.sha256(json.dumps(outbound, sort_keys=True,
+        separators=(',', ':')).encode()).hexdigest())
 
 
 def identity(outbound):
-    digest = sample_key(outbound)[1]
+    digest = sample_key(outbound).digest
     return 'probe_' + digest, digest

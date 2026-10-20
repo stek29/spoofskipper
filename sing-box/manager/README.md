@@ -39,7 +39,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `bootstrap_backoff_max_seconds` | 300 | Maximum bootstrap retry delay |
 | `gate_active_seconds` | 60 | Active-path gate interval |
 | `gate_standby_seconds` | 480 | Standby-path gate interval |
-| `throttle_seconds` | 300 | Active-path body check interval |
+| `throttle_seconds` | 300 | Active-path threshold check interval |
 | `throughput_active_seconds` | 3600 | Active throughput interval |
 | `throughput_shortlist_seconds` | 21600 | Shortlisted standby throughput interval |
 | `throughput_sweep_seconds` | 172800 | Remaining standby throughput interval and ranking age |
@@ -51,7 +51,6 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_stall_timeout` | 2 | Body stall deadline |
 | `throughput_seconds` | 4 | Throughput duration, maximum 4 |
 | `probe_url` | `https://speed.cloudflare.com/__down?bytes={bytes}` | Verified HTTPS endpoint with a `{bytes}` placeholder |
-| `probe_backup_url` | `https://proof.ovh.net/files/1Mb.dat` | Verified HTTPS backup HEAD/Range endpoint |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch.
@@ -71,26 +70,39 @@ before a local proxy. Providers outside an explicit tier list are excluded.
 }
 ```
 
-A higher tier must be confirmed failed before a lower tier is eligible. Unknown
-health requests gates first. Confirmed failure bypasses the hold and score margin;
-all-path failure keeps the current route and never adds direct routing.
+Every probe is one HTTPS request through the path, differing only in size:
+
+| Probe | Body | Proves |
+|---|---|---|
+| `gate` | 1 byte | Reachability and latency |
+| `throttle` | 256 KiB | The connection keeps working past the throttling threshold |
+| `throughput` | up to 8 MiB | Rate after the first 512 KiB; also passes the threshold |
+
+A path is healthy only after a `throttle` or `throughput` probe reads past 256 KiB.
+Gates keep proven health fresh but cannot make an unknown or failed path healthy,
+because throttling middleboxes pass small responses and stall larger ones. A
+failed probe is repeated immediately; two failures in a row mark the path
+failed. A failed path that answers a gate gets one `throttle` re-check per gate.
+
+A higher tier must be failed before a lower tier is eligible. Unknown health
+requests gates first. Failure of the active path bypasses the hold and score
+margin, but switches only to a path that answered after the failure; if the probe
+endpoint itself is down, no path qualifies and the current route is kept.
+All-path failure keeps the current route and never adds direct routing.
 
 The five-minute elective hold and 15% improvement margin are fixed policy rules,
 not configurable cadences. Scores use the last three successful throughput/latency
 samples, capped at 50 Mbps and weighted by provider. Active scores expire after
-two hours. Elective switches require a new post-hold challenger measurement.
-Return from a working lower tier requires post-hold throughput and throttle
-checks no more than `30 + probe_timeout` seconds apart, with the throttle
-completed within 30 seconds of the decision. An expired pair starts a new
-challenge immediately. Attempts cancelled by a reload or selector write can
-be retried immediately; upstream-change and worker-error discards retain their
-normal scheduling timestamps.
+two hours. Every elective switch, including a return to a higher tier (which skips
+the margin), requires a `throughput` result taken after the hold and no older than
+30 seconds. A failed or stale challenge is retried at `early_test_seconds`.
+Attempts cancelled by a reload or selector write can be retried immediately;
+upstream-change and worker-error discards retain their normal scheduling timestamps.
 
-Three failed gates request backup HEAD. Body failures require body evidence;
-HEAD/tiny successes cannot clear them. Throughput skips 512 KiB and stops at four
-seconds, 4 MiB scored, or sufficient evidence above 50 Mbps. Insufficient evidence
-means unknown performance; after two unknown results, early shortlist downloads
-back off to the sweep cadence. Native URLTest checks remain independently active.
+Throughput skips 512 KiB and stops at four seconds, 4 MiB scored, or sufficient
+evidence above 50 Mbps. Insufficient evidence means unknown performance; after two
+unknown results, early shortlist downloads back off to the sweep cadence. Native
+URLTest checks remain independently active.
 
 ## Enable and disable
 
@@ -179,7 +191,7 @@ the tracked suite; it is not a supported test interface for this runtime.
 | `settings_invalid_using_saved_config`, `cached_render_failed`, `refresh_failed` | Settings/render/fetch problem; saved state may still serve traffic |
 | `provider_refreshed`, `provider_refresh_failed` | Per-provider refresh result; failed providers retain last-good snapshots |
 | `bootstrap_waiting_for_providers` | No usable provider snapshot yet; retrying |
-| `probe_sample`, `probe_failed`, `probe_corroboration`, `probe_discarded` | Measurement result, failure, backup evidence or invalidated result |
+| `probe_sample`, `probe_failed`, `probe_discarded` | Measurement result, failure or invalidated result |
 | `probe_inspection_failed`, `scheduler_tick_failed` | Measurement/control error logged while the core remains running |
 | `selector_decision`, `selector_switched`, `selector_handoff`, `selector_write_failed` | Policy reason, verified write or write failure |
 | `observe_summary` | Choices, scores/ages, actual managed decisions and unmanaged eligible rankings |
@@ -188,7 +200,7 @@ the tracked suite; it is not a supported test interface for this runtime.
 `observe_summary.application_bytes.hour` counts application traffic since the
 previous summary and resets after logging; `today` counts the UTC day. Counters
 include partial attempts, CONNECT/HTTP requests, headers/framing, received bodies,
-skipped prefixes and backups. `body_received` counts consumed decoded body bytes;
+and skipped prefixes. `body_received` counts consumed decoded body bytes;
 received bytes also include buffer read-ahead. TLS/transport overhead and unread
 server buffers are excluded. These are application counters, not billing totals.
 

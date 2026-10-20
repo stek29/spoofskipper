@@ -3,6 +3,7 @@ from . import clash_api
 from .clash_api import resolve
 from .compiler import selectors
 from .policy import Policy, score, eligible_pool
+from .probes import Probe
 from .settings import ACTIVE_SCORE_MAX_AGE
 
 
@@ -41,36 +42,35 @@ class SelectorController:
                 measurements.samples, now, measurements.settings, members)
             self.decisions[selector] = decision
             pending = self.policy.pending.get(selector)
-            for key, kind in decision.tests:
-                last = measurements.samples[key].last.get(kind, float('-inf'))
-                # Retry failed/unknown challenges at the early-test cadence,
-                # rather than hammering an unscored or unreachable candidate.
-                since = pending[1] if pending and pending[0] == key else now
-                interval = measurements.settings['gate_active_seconds'] if kind == 'gate' else measurements.settings['early_test_seconds']
-                if (kind != 'gate' and last < since) or now-last >= interval:
-                    measurements.requested.setdefault(key, kind)
+            for key, probe in decision.tests:
+                last = measurements.samples[key].last.get(probe, float('-inf'))
+                # Run each requested test once per decision; retry failed or
+                # unknown results at the normal cadence rather than every tick.
+                interval = measurements.settings['gate_active_seconds' if probe is Probe.GATE else 'early_test_seconds']
+                if last < decision.since or now-last >= interval:
+                    measurements.requested.setdefault(key, probe)
             target = decision.target
             compared = []
-            for tag in (measurements.active[selector], target[0] if target else
-                        pending[0][0] if pending else None):
-                key = next((k for k in measurements.candidates if k[0] == tag), None)
+            for tag in (measurements.active[selector], target.tag if target else
+                        pending[0].tag if pending else None):
+                key = next((k for k in measurements.candidates if k.tag == tag), None)
                 if key:
                     sample = measurements.samples[key]
-                    compared.append({'candidate': tag, 'score': score(sample, measurements.candidates[key]['weight'], now,
+                    compared.append({'candidate': tag, 'score': score(sample, measurements.candidates[key].weight, now,
                         ACTIVE_SCORE_MAX_AGE if tag == measurements.active[selector] else measurements.settings['throughput_sweep_seconds']),
                         'sample_age': now-sample.throughput_at if sample.successes else None})
             signature = (decision.reason, target, pending)
             if self.last_decisions.get(selector) != signature:
                 self.log('selector_decision', selector=selector, reason=decision.reason, compared=compared)
                 self.last_decisions[selector] = signature
-            if target is None or target[0] == measurements.active[selector]:
+            if target is None or target.tag == measurements.active[selector]:
                 continue
             try:
                 measurements.invalidate()
                 measurements.restart_client()
-                clash_api.select(measurements.config, selector, target[0], managed)
-                self.policy.observe(selector, target[0], now)
-                self.log('selector_switched', selector=selector, candidate=target[0], reason=decision.reason,
+                clash_api.select(measurements.config, selector, target.tag, managed)
+                self.policy.observe(selector, target.tag, now)
+                self.log('selector_switched', selector=selector, candidate=target.tag, reason=decision.reason,
                          compared=compared)
                 self.inspect()  # Invalidate samples whose effective paths changed.
             except Exception as exc:
@@ -92,7 +92,7 @@ class SelectorController:
             proposed = max(pool.available, key=pool.rank) if pool.available and not pool.unresolved else None
             reason = ('priority_health_unknown' if pool.unresolved else
                       'observed_ranking' if proposed else 'health_or_performance_unknown')
-        choice = {'active': current, 'proposed': proposed[0] if proposed else None,
+        choice = {'active': current, 'proposed': proposed.tag if proposed else None,
                   'proposed_score': pool.value(proposed, ACTIVE_SCORE_MAX_AGE if proposed == pool.active
                                               else None) if proposed else None, 'reason': reason}
         if selector in measurements.settings.managed_selectors:
