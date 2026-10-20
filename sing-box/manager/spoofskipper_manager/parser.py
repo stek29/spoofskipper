@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import http.client
+import ipaddress
 import json
 import re
 import socket
@@ -43,7 +44,8 @@ def _create_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_a
     for family, kind, proto, _, sockaddr in socket.getaddrinfo(*address, 0, socket.SOCK_STREAM):
         sock = socket.socket(family, kind, proto)
         try:
-            _bind(sock)
+            if not ipaddress.ip_address(sockaddr[0].split('%')[0]).is_loopback:
+                _bind(sock)  # Loopback is unreachable through a physical interface.
             if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
                 sock.settimeout(timeout)
             if source_address:

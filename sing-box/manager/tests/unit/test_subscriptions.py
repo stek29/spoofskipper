@@ -159,4 +159,15 @@ class SubscriptionTests(unittest.TestCase):
                 patch.object(parser.urllib.request, 'urlopen', side_effect=AssertionError('unbound')):
             body = parser.fetch_url(f'http://127.0.0.1:{server.server_port}/')
         self.assertEqual(body, 'trojan://s@localhost:443#one')
-        self.assertEqual(len(bound), 1)
+        self.assertEqual(bound, [])  # Loopback stays unbound; it is not behind eth0.
+        sockets = []
+        class Socket:
+            def __init__(self, *args):
+                sockets.append(self)
+            settimeout = connect = lambda self, *args: None
+        remote = [(2, 1, 6, '', ('192.0.2.1', 443))]
+        with patch.object(parser, 'BIND_INTERFACE', 'eth0'), patch.object(parser, '_bind', bound.append), \
+                patch.object(parser.socket, 'getaddrinfo', return_value=remote), \
+                patch.object(parser.socket, 'socket', Socket):
+            self.assertIs(parser._create_connection(('example.test', 443), 5), sockets[0])
+        self.assertEqual(bound, sockets)

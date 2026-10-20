@@ -59,8 +59,9 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch. Fetches bind to
 the interface of the main table's default route, so they leave directly (as a host
 cron did) instead of being captured by the supervised core's tun, where they would
-arrive without a domain and follow the final rule. Without a default route, or
-without the privilege to bind, sockets use normal routing.
+arrive without a domain and follow the final rule. Loopback destinations, hosts
+without a default route, or a process
+without the privilege to bind use normal routing.
 Subscription specs retain the existing format; provider prefixes must be unique
 (a missing prefix is `''`, as in `sing-subs`). Local proxy leaves are discovered from the rendered graph;
 direct/block/DNS entries are excluded. Protocols have no special preference.
