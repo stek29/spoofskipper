@@ -108,6 +108,8 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.scheduler.next_test(key, [], self.now), Probe.THROTTLE)
         self.scheduler.tick()
         self.assertIn((key, Probe.THROTTLE, self.scheduler.epoch), self.scheduler.jobs.values())
+        endpoints = [args[-2] for _, args in self.submissions if args[2] is self.scheduler.candidates[key]]
+        self.assertEqual(endpoints, [1])  # Confirmed against the fallback endpoint.
         self.assertIsNone(sample.confirm)
         self.scheduler.invalidate()  # A reload cancels the confirmation; it is re-armed.
         self.assertEqual(sample.confirm, Probe.THROTTLE)

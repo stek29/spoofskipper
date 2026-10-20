@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from spoofskipper_manager.settings import Settings, load_settings, DEFAULT_PROBE_URL
+from spoofskipper_manager.settings import Settings, load_settings, DEFAULT_PROBE_URLS
 from spoofskipper_manager.state import write_json
 
 INVALID = [
@@ -21,8 +21,9 @@ INVALID = [
     {'probe_workers': 5},
     {'probe_port': 19089},  # Same as clash_api_port.
     {'probe_timeout': 16},
-    {'probes_enabled': True, 'probe_url': 'http://example.test/?bytes={bytes}'},
-    {'probes_enabled': True, 'probe_url': 'https://example.test/fixed'},
+    *({'probes_enabled': True, 'probe_urls': urls}
+      for urls in ('https://example.test/', [], ['http://example.test/?bytes={bytes}'],
+                   ['https://example.test/'] * 2, [1])),
 ]
 
 
@@ -47,7 +48,7 @@ class SettingsTests(unittest.TestCase):
         settings = self.load({'probes_enabled': True, 'managed_selectors': ['choice'],
                               'provider_weights': {'p': 2},
                               'selector_priorities': {'choice': [['p', 'q'], ['local']]}})
-        self.assertEqual(settings.probe_url, DEFAULT_PROBE_URL)
+        self.assertEqual(settings.probe_urls, DEFAULT_PROBE_URLS)
         self.assertEqual(settings.selector_priorities['choice'], (('p', 'q'), ('local',)))
         with self.assertRaises(FrozenInstanceError):
             settings.probes_enabled = False

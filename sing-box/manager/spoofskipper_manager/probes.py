@@ -45,6 +45,7 @@ class ProbeResult:
     early_stop: bool = False
     status: int | None = None
     error: str | None = None
+    endpoint: int = 0  # index into probe_urls; only the first is scored
     completed_at: float | None = None
 
     @property
@@ -119,12 +120,14 @@ class _Connection(http.client.HTTPSConnection):
         self.sock.sendall(data)
 
 
-def validate_response(response, expected):
+def validate_response(response, expected, ranged):
     # http.client handles framing; only reject what would distort the measurement.
     if response.getheader('Content-Encoding', 'identity').lower() != 'identity':
         raise ValueError('encoded body')
-    if response.status != 200:
+    if response.status != (206 if ranged else 200):
         raise ValueError('unexpected status')
+    if ranged and not response.getheader('Content-Range', '').startswith(f'bytes 0-{expected-1}/'):
+        raise ValueError('unexpected range')
     length = response.length  # Parsed by http.client before any body is read; None if chunked.
     if length is not None and length != expected:
         raise ValueError('unexpected body length')
@@ -147,16 +150,22 @@ class ProbeClient:
                     except OSError:
                         pass
 
-    def run(self, outbound, probe):
+    def run(self, outbound, probe, endpoint=0):
         probe = Probe(probe)
         started = self.clock()
         expected = probe.budget
         connection = response = None
         body = 0
         post_started = burst = None
-        result = ProbeResult(probe)
+        endpoint %= len(self.settings.probe_urls)
+        result = ProbeResult(probe, endpoint=endpoint)
+        url = self.settings.probe_urls[endpoint]
+        ranged = '{bytes}' not in url
+        headers = {'Accept-Encoding': 'identity', 'Connection': 'close'}
+        if ranged:
+            headers['Range'] = f'bytes=0-{expected-1}'
         try:
-            target = urlsplit(self.settings.probe_url.replace('{bytes}', str(expected)))  # Validated on load.
+            target = urlsplit(url.replace('{bytes}', str(expected)))  # Validated on load.
             connection = _Connection(self, started + self.settings.probe_timeout)
             user, password = identity(outbound)
             connection.set_tunnel(target.hostname, target.port or 443, headers={
@@ -164,10 +173,10 @@ class ProbeClient:
             with self.lock:
                 self.connections.add(connection)
             path = (target.path or '/') + ('?' + target.query if target.query else '')
-            connection.request('GET', path, headers={'Accept-Encoding': 'identity', 'Connection': 'close'})
+            connection.request('GET', path, headers=headers)
             response = connection.getresponse()
             result.status = response.status
-            validate_response(response, expected)
+            validate_response(response, expected, ranged)
             if probe is Probe.THROUGHPUT:
                 # Time-box only the body: slow setup must not cost the measurement.
                 connection.deadline = self.clock() + self.settings.throughput_seconds

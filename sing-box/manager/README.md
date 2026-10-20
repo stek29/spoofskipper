@@ -51,7 +51,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_timeout` | 15 | Overall probe deadline, maximum 15 |
 | `probe_stall_timeout` | 2 | Body stall deadline |
 | `throughput_seconds` | 4 | Throughput body time box after headers, maximum 4 |
-| `probe_url` | `https://speed.cloudflare.com/__down?bytes={bytes}` | Verified HTTPS endpoint with a `{bytes}` placeholder |
+| `probe_urls` | Cloudflare `__down`, then `https://proof.ovh.net/files/100Mb.dat` | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch.
@@ -71,7 +71,9 @@ before a local proxy. Providers outside an explicit tier list are excluded.
 }
 ```
 
-Every probe is one HTTPS request through the path, differing only in size:
+Every probe is one HTTPS request through the path, differing only in size. A URL
+with a `{bytes}` placeholder is asked for exactly that many bytes; a URL without
+one must be a static file of at least 16 MiB, read with a `Range` request.
 
 | Probe | Body | Proves |
 |---|---|---|
@@ -82,8 +84,11 @@ Every probe is one HTTPS request through the path, differing only in size:
 A path is healthy only after a `throttle` or `throughput` probe reads past 256 KiB.
 Gates keep proven health fresh but cannot make an unknown or failed path healthy,
 because throttling middleboxes pass small responses and stall larger ones. A
-failed probe is repeated immediately; two failures in a row mark the path
-failed. A failed path that answers a gate gets one `throttle` re-check per gate.
+failed probe is repeated immediately against the next endpoint in `probe_urls`;
+two failures in a row mark the path failed, so an outage or block of one
+endpoint does not fail working paths. Only the first endpoint's latency and
+throughput are scored, keeping scores comparable; while it is unreachable,
+paths stay healthy through the fallback but their scores age out. A failed path that answers a gate gets one `throttle` re-check per gate.
 
 A higher tier must be failed before a lower tier is eligible. Unknown health
 requests gates first. Failure of the active path bypasses the hold and score

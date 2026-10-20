@@ -18,7 +18,10 @@ SCHEDULER_ERROR_LOG_SECONDS = 60
 # Policy invariants, deliberately fixed rather than operator-tunable cadences.
 HOLD = 300
 MARGIN = 1.15
-DEFAULT_PROBE_URL = 'https://speed.cloudflare.com/__down?bytes={bytes}'
+# Probes use the first endpoint; a failure is confirmed against the next one.
+# URLs without {bytes} serve a large static file read with a Range request.
+DEFAULT_PROBE_URLS = ('https://speed.cloudflare.com/__down?bytes={bytes}',
+                      'https://proof.ovh.net/files/100Mb.dat')
 
 
 @dataclass(frozen=True)
@@ -43,11 +46,12 @@ class Settings:
     managed_selectors: tuple[str, ...] = ()
     provider_weights: Mapping[str, float] = field(default_factory=dict)
     selector_priorities: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
-    probe_url: str = DEFAULT_PROBE_URL
+    probe_urls: tuple[str, ...] = DEFAULT_PROBE_URLS
     probe_ca_bundle: str | None = None
 
     def __post_init__(self):
         object.__setattr__(self, 'managed_selectors', tuple(self.managed_selectors))
+        object.__setattr__(self, 'probe_urls', tuple(self.probe_urls))
         object.__setattr__(self, 'provider_weights', MappingProxyType(dict(self.provider_weights)))
         object.__setattr__(self, 'selector_priorities', MappingProxyType({
             tag: tuple(tuple(tier) for tier in tiers)
@@ -108,15 +112,15 @@ def load_settings(config_dir):
         raise ValueError('probe_port and clash_api_port must differ')
     if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
         raise ValueError('probe deadlines exceed bounded maximum')
-    if 'probe_url' in settings and not isinstance(settings['probe_url'], str):
-        raise ValueError('invalid probe URL')
+    urls = settings.get('probe_urls', list(DEFAULT_PROBE_URLS))
+    if (not isinstance(urls, list) or not urls or len(set(urls)) != len(urls)
+            or any(not isinstance(url, str) for url in urls)):
+        raise ValueError('probe_urls must be a non-empty list of distinct URLs')
     if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
         raise ValueError('probe_ca_bundle must be a file path')
     if settings.get('probes_enabled', False):
         ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
-        url = urlsplit(settings.get('probe_url', DEFAULT_PROBE_URL))
-        if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
-            raise ValueError('probe endpoint must be HTTPS')
-        if '{bytes}' not in settings.get('probe_url', '{bytes}'):
-            raise ValueError('probe_url requires {bytes}')
+        for url in map(urlsplit, urls):
+            if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
+                raise ValueError('probe endpoint must be HTTPS')
     return Settings.from_mapping(settings)

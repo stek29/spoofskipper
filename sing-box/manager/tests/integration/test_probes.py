@@ -39,11 +39,20 @@ class ProbeIntegrationTests(unittest.TestCase):
                     except OSError:
                         pass
                     return
-                size = int(parse_qs(urlsplit(self.path).query)['bytes'][0])
+                query = parse_qs(urlsplit(self.path).query)
+                if 'bytes' in query:
+                    if owner.mode == 'primary_down':
+                        self.send_error(503)
+                        return
+                    size, status = int(query['bytes'][0]), 200
+                else:  # A static file read with a Range request.
+                    size, status = int(self.headers['Range'].split('-')[1]) + 1, 206
                 chunked = owner.mode.startswith('chunked') or owner.mode == 'ambiguous_framing'
                 if owner.mode == 'chunked_oversize':
                     size += 1
-                self.send_response(200)
+                self.send_response(status)
+                if status == 206:
+                    self.send_header('Content-Range', f'bytes 0-{size-1}/104857600')
                 if chunked:
                     self.send_header('Transfer-Encoding', 'chunked')
                 if not chunked or owner.mode == 'ambiguous_framing':
@@ -87,7 +96,8 @@ class ProbeIntegrationTests(unittest.TestCase):
         self.port = free_port()
         self.settings = {'probe_port': self.port, 'probe_timeout': .45, 'probe_stall_timeout': .15,
                          'throughput_seconds': 2, 'probe_ca_bundle': str(FIXTURES/'probe-ca.pem'),
-                         'probe_url': f'https://localhost:{self.server.server_port}/__down?bytes={{bytes}}'}
+                         'probe_urls': [f'https://localhost:{self.server.server_port}/__down?bytes={{bytes}}',
+                                        f'https://localhost:{self.server.server_port}/100Mb.dat']}
         relay_port = free_port()
         self.core({'log': {'disabled': True}, 'inbounds': [{'type': 'socks',
             'listen': '127.0.0.1', 'listen_port': relay_port}],
@@ -171,14 +181,14 @@ class ProbeIntegrationTests(unittest.TestCase):
         key = sample_key(chained)
         try:
             scheduler.controller.inspect()
-            result = scheduler.perform(scheduler.client, scheduler.candidates[key], 'throttle')
+            result = scheduler.perform(scheduler.client, scheduler.candidates[key], 0, 'throttle')
             self.assertTrue(result.ok, result)
             scheduler.accept(key, result, time.monotonic())
             self.assertTrue(scheduler.samples[key].healthy)
             clash_api.select(config, 'hop', 'offline', ['hop'])
             scheduler.controller.inspect()
             self.assertIsNone(scheduler.samples[key].healthy)
-            result = scheduler.perform(scheduler.client, scheduler.candidates[key], 'gate')
+            result = scheduler.perform(scheduler.client, scheduler.candidates[key], 0, 'gate')
             self.assertFalse(result.ok)
             clash_api.select(config, 'hop', 'candidate', ['hop'])
             scheduler.controller.inspect()
@@ -212,6 +222,14 @@ class ProbeIntegrationTests(unittest.TestCase):
             self.assertTrue(sample.healthy)
         finally:
             scheduler.close()
+
+    def test_fallback_endpoint_reads_a_range_of_a_static_file(self):
+        self.mode = 'primary_down'
+        self.assertEqual(self.client.run(self.outbound, 'gate').error, 'ValueError')
+        for kind, size in (('gate', 1), ('throttle', THROTTLE)):
+            result = self.client.run(self.outbound, kind, endpoint=1)
+            self.assertTrue(result.ok, result)
+            self.assertEqual((result.bytes, result.endpoint), (size, 1))
 
     def test_freeze_truncation_slow_completion_and_throughput_early_stop(self):
         for mode in ('freeze', 'truncate'):
@@ -379,7 +397,7 @@ class ProbeIntegrationTests(unittest.TestCase):
             thread = threading.Thread(target=stalled_tls, daemon=True)
             thread.start()
             client = ProbeClient({**self.settings, 'probe_timeout': 15,
-                'probe_url': f'https://localhost:{listener.getsockname()[1]}/?bytes={{bytes}}'})
+                'probe_urls': [f'https://localhost:{listener.getsockname()[1]}/?bytes={{bytes}}']})
             try:
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(client.run, self.outbound, 'gate')

@@ -83,6 +83,14 @@ class SampleHealthTests(unittest.TestCase):
         self.assertEqual(sample.health, Health.HEALTHY)
         self.assertEqual(sample.failures, 0)
 
+    def test_fallback_endpoint_proves_health_but_is_not_scored(self):
+        sample = Sample(latency=30)
+        sample.record(failed(Probe.THROUGHPUT), 100)
+        self.assertEqual(sample.confirm, Probe.THROUGHPUT)
+        sample.record(ok(Probe.THROUGHPUT, mbps=90, endpoint=1, latency_ms=200), 101)
+        self.assertEqual((sample.health, sample.failures, sample.threshold_at), (Health.HEALTHY, 0, 101))
+        self.assertEqual((sample.latency, sample.successes), (30, []))
+
     def test_connection_failure_without_latency_keeps_last_latency(self):
         sample = Sample(latency=30)
         sample.record(failed(Probe.GATE), 100)

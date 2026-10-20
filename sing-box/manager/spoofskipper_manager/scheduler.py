@@ -125,8 +125,8 @@ class Scheduler:
         return {key for keys in groups.values()
                 for key in sorted(keys, key=lambda k: self.samples[k].latency_or_inf)[:SHORTLIST_SIZE]}
 
-    def perform(self, client, candidate, probe):
-        result = client.run(candidate.outbound, probe)
+    def perform(self, client, candidate, endpoint, probe):
+        result = client.run(candidate.outbound, probe, endpoint)
         result.completed_at = self.clock()
         return result
 
@@ -230,7 +230,8 @@ class Scheduler:
             sample.last[probe] = now
             if sample.confirm is probe:
                 sample.confirm = None
-            future = self.pool.submit(self.perform, self.client, candidate, probe)
+            # The n-th consecutive failure is confirmed against the next endpoint.
+            future = self.pool.submit(self.perform, self.client, candidate, sample.failures, probe)
             self.jobs[future] = (key, probe, self.epoch)
             self.job_versions[future] = self.path_versions.get(key, 0)
         if policy_error is not None:
