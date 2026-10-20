@@ -37,7 +37,8 @@ def free_port():
 
 
 @unittest.skipUnless(shutil.which('jsonnet'), 'requires jsonnet (or run Compose harness)')
-class LifecycleTests(unittest.TestCase):
+class LifecycleHarness(unittest.TestCase):
+    """A manager subprocess with fixture config, subscriptions and core; no tests."""
     core = str(FIXTURES / 'fake-core.py')
 
     def setUp(self):
@@ -104,6 +105,8 @@ class LifecycleTests(unittest.TestCase):
     def ready(self):
         wait_for(lambda: 'activation_succeeded' in self.logs())
 
+
+class LifecycleTests(LifecycleHarness):
     def test_partial_first_start_guarded_addition_outage_and_noop_age(self):
         self.specs['subscriptions'].append({**self.specs['subscriptions'][0], 'prefix': 'later', 'url': self.url + '/missing'})
         write_json(self.config / 'local-subs-config.json', self.specs)

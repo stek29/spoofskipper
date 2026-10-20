@@ -224,3 +224,52 @@ class CompilerTests(unittest.TestCase):
             child.kill.assert_called_once()
             self.assertEqual(child.wait.call_count, 2)
             self.assertIsNone(m.child)
+
+
+class OwnershipTests(unittest.TestCase):
+    def config(self):
+        leaves = [{'type': 'trojan', 'tag': tag, 'server': '127.0.0.1', 'server_port': 1, 'password': 'fixture'} for tag in ('a', 'b')]
+        c = {'outbounds': leaves + [{'type': 'urltest', 'tag': 'p_best', 'outbounds': ['a', 'b']}] +
+            [{'type': 'selector', 'tag': tag, 'outbounds': ['p_best', 'a', 'b']} for tag in
+             ('proxy_main', 'proxy_deepmind', 'chained_upstream')],
+             'experimental': {'clash_api': {'external_controller': '127.0.0.1:9090'}}}
+        return c, [{'outbound': o} for o in leaves]
+
+    def test_handoff_flattens_only_owned_selectors(self):
+        native, candidates = self.config()
+        c = copy.deepcopy(native)
+        compiler.handoff_selectors(c, ['proxy_main'], candidates)
+        entries = {o['tag']: o for o in c['outbounds']}
+        self.assertEqual(entries['proxy_main']['outbounds'], ['a', 'b'])
+        self.assertEqual(entries['proxy_deepmind']['outbounds'], ['p_best', 'a', 'b'])
+        c = copy.deepcopy(native)
+        compiler.handoff_selectors(c, [], candidates)
+        self.assertEqual(c, native)
+
+    def test_handoff_rejects_incompatible_members_and_cycles(self):
+        c, candidates = self.config()
+        c['outbounds'].append({'type': 'direct', 'tag': 'bypass'})
+        c['outbounds'][2]['outbounds'].append('bypass')
+        with self.assertRaises(ValueError):
+            compiler.handoff_selectors(c, ['proxy_main'], [])
+        c['outbounds'][-1]['outbounds'] = ['chained_upstream']
+        with self.assertRaises(ValueError):
+            compiler.handoff_selectors(c, ['proxy_main'], candidates)
+
+    def test_write_verification_rolls_back_only_failed_selector(self):
+        c, _ = self.config()
+        with patch.object(clash_api, 'proxies', side_effect=[{'proxy_main': {'now': 'a'}},
+                {'proxy_main': {'now': 'a'}}, {'proxy_main': {'now': 'a'}}]), \
+                patch.object(clash_api.urllib.request, 'build_opener') as opener:
+            with self.assertRaises(ValueError):
+                clash_api.select(c, 'proxy_main', 'b', ['proxy_main'])
+            calls = opener.return_value.open.call_args_list
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(call.args[0].full_url.endswith('/proxies/proxy_main') for call in calls))
+            self.assertIn(b'"name": "b"', calls[0].args[0].data)
+            self.assertIn(b'"name": "a"', calls[1].args[0].data)
+            self.assertIsNone(calls[0].args[0].get_header('Authorization'))
+        with patch.object(clash_api, 'proxies') as inspect:
+            with self.assertRaises(ValueError):
+                clash_api.select(c, 'proxy_main', 'b', [])
+            inspect.assert_not_called()

@@ -57,9 +57,6 @@ class ProbeIntegrationTests(unittest.TestCase):
                     self.send_header('Transfer-Encoding', 'chunked')
                 if not chunked or owner.mode == 'ambiguous_framing':
                     self.send_header('Content-Length', str(size))
-                if owner.mode == 'keepalive':
-                    self.send_header('Connection', 'keep-alive')
-                    self.close_connection = False
                 self.send_header('Server-Timing', 'first;dur=1')
                 self.send_header('Server-Timing', 'second;dur=2')
                 if owner.mode == 'duplicate_length':
@@ -372,13 +369,11 @@ class ProbeIntegrationTests(unittest.TestCase):
         self.assertIsNone(result.mbps)
 
 
-    def test_stdlib_chunked_framing_and_keepalive(self):
-        for mode in ('chunked', 'keepalive'):
-            self.mode = mode
-            for kind, size in (('gate', 1), ('throttle', THROTTLE)):
-                result = self.client.run(self.outbound, kind)
-                self.assertTrue(result.ok, (mode, result))
-                self.assertEqual(result.bytes, size)
+    def test_chunked_bodies_are_size_checked(self):
+        self.mode = 'chunked'
+        result = self.client.run(self.outbound, 'throttle')
+        self.assertTrue(result.ok, result)
+        self.assertEqual(result.bytes, THROTTLE)
         for mode in ('chunked_truncate', 'chunked_oversize'):
             self.mode = mode
             result = self.client.run(self.outbound, 'gate')

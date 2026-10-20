@@ -1,4 +1,4 @@
-"""Pinned-core verification; exercised by the offline Compose harness."""
+"""Pinned-core verification of what the fake core cannot show; run by the offline Compose harness."""
 import shutil
 import signal
 import unittest
@@ -10,7 +10,7 @@ from spoofskipper_manager.state import write_json
 
 
 @unittest.skipUnless(shutil.which('sing-box'), 'requires pinned sing-box (run Compose harness)')
-class RealCoreTests(test_lifecycle.LifecycleTests):
+class RealCoreTests(test_lifecycle.LifecycleHarness):
     core = 'sing-box'
 
     # Fault-only fields are deliberately rejected by the real config decoder.

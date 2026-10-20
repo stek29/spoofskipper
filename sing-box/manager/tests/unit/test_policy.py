@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from spoofskipper_manager import clash_api, compiler
+from spoofskipper_manager import clash_api
 from spoofskipper_manager.identity import Candidate, SampleKey
 from spoofskipper_manager.policy import Policy, score
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
@@ -48,34 +48,23 @@ class PolicyTests(unittest.TestCase):
         s.health = Health.FAILED
         self.assertIsNone(score(s, 1, 1000, 7200))
 
-    def test_hold_margin_and_mandatory_fresh_challenger(self):
-        self.sample('b').successes = [(1000, 11, 50)]
+    def test_elective_switch_needs_margin_hold_and_fresh_throughput(self):
+        self.sample('b').successes = [(1000, 11, 50)]  # Within the 15% margin.
         self.assertEqual(self.decide().reason, 'margin_or_performance_unknown')
-
-    def test_fresh_switch_and_failed_fresh_margin(self):
         self.sample('b').successes = [(1000, 40, 50)]
         self.assertEqual(self.decide().reason, 'hold')
         self.now = 1300
         d = self.decide()
-        self.assertEqual(d.tests, ((key('b'), Probe.THROUGHPUT),))
-        self.assertEqual(d.since, 1300)
+        self.assertEqual((d.reason, d.tests, d.since), ('challenger_test', ((key('b'), Probe.THROUGHPUT),), 1300))
         self.sample('b').successes = [(1301, 40, 50)]
-        self.now = 1301
-        self.assertEqual(self.decide().target, key('b'))
-        self.sample('b').successes = [(1301, 1, 50)]
-        self.assertIsNone(self.decide().target)
-
-    def test_challenger_result_older_than_freshness_is_retested(self):
-        self.sample('b').successes = [(1000, 40, 50)]
-        self.decide()
-        self.now = 1300
-        self.decide()
-        self.sample('b').successes = [(1301, 40, 50)]
-        self.now = 1332
+        self.now = 1332  # Taken after the challenge began, but no longer fresh.
         d = self.decide()
-        self.assertIsNone(d.target)
-        self.assertEqual(d.reason, 'challenger_test')
-        self.assertEqual(d.since, 1300)  # The controller retries at the early cadence.
+        self.assertEqual((d.target, d.reason, d.since), (None, 'challenger_test', 1300))
+        self.sample('b').successes = [(1333, 40, 50)]
+        self.now = 1334
+        self.assertEqual(self.decide().target, key('b'))
+        self.sample('b').successes = [(1333, 1, 50)]  # The fresh result lost the margin.
+        self.assertIsNone(self.decide().target)
 
     def test_immediate_failure_last_score_unknown_fallback_and_all_failed(self):
         self.decide()
@@ -154,7 +143,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.decide().reason, 'health_unknown')
         self.assertTrue(all(probe is Probe.GATE for _, probe in self.decide().tests))
 
-    def test_failure_uses_last_known_score_even_beyond_sweep(self):
+    def test_failover_ranks_by_last_known_score_of_any_age(self):
         self.sample('a').health = Health.FAILED
         self.sample('b').successes = [(-1000000, 40, 50)]
         self.sample('c').successes = [(1000, 1, 50)]
@@ -168,55 +157,6 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.decide().reason, 'hold')
         self.now = 1300
         self.assertEqual(self.decide().reason, 'challenger_test')
-
-
-class OwnershipTests(unittest.TestCase):
-    def config(self):
-        leaves = [{'type': 'trojan', 'tag': tag, 'server': '127.0.0.1', 'server_port': 1, 'password': 'fixture'} for tag in ('a', 'b')]
-        c = {'outbounds': leaves + [{'type': 'urltest', 'tag': 'p_best', 'outbounds': ['a', 'b']}] +
-            [{'type': 'selector', 'tag': tag, 'outbounds': ['p_best', 'a', 'b']} for tag in
-             ('proxy_main', 'proxy_deepmind', 'chained_upstream')],
-             'experimental': {'clash_api': {'external_controller': '127.0.0.1:9090'}}}
-        return c, [{'outbound': o} for o in leaves]
-
-    def test_handoff_flattens_only_owned_selectors(self):
-        native, candidates = self.config()
-        c = copy.deepcopy(native)
-        compiler.handoff_selectors(c, ['proxy_main'], candidates)
-        entries = {o['tag']: o for o in c['outbounds']}
-        self.assertEqual(entries['proxy_main']['outbounds'], ['a', 'b'])
-        self.assertEqual(entries['proxy_deepmind']['outbounds'], ['p_best', 'a', 'b'])
-        c = copy.deepcopy(native)
-        compiler.handoff_selectors(c, [], candidates)
-        self.assertEqual(c, native)
-
-    def test_handoff_rejects_incompatible_members_and_cycles(self):
-        c, candidates = self.config()
-        c['outbounds'].append({'type': 'direct', 'tag': 'bypass'})
-        c['outbounds'][2]['outbounds'].append('bypass')
-        with self.assertRaises(ValueError):
-            compiler.handoff_selectors(c, ['proxy_main'], [])
-        c['outbounds'][-1]['outbounds'] = ['chained_upstream']
-        with self.assertRaises(ValueError):
-            compiler.handoff_selectors(c, ['proxy_main'], candidates)
-
-    def test_write_verification_rolls_back_only_failed_selector(self):
-        c, _ = self.config()
-        with patch.object(clash_api, 'proxies', side_effect=[{'proxy_main': {'now': 'a'}},
-                {'proxy_main': {'now': 'a'}}, {'proxy_main': {'now': 'a'}}]), \
-                patch.object(clash_api.urllib.request, 'build_opener') as opener:
-            with self.assertRaises(ValueError):
-                clash_api.select(c, 'proxy_main', 'b', ['proxy_main'])
-            calls = opener.return_value.open.call_args_list
-            self.assertEqual(len(calls), 2)
-            self.assertTrue(all(call.args[0].full_url.endswith('/proxies/proxy_main') for call in calls))
-            self.assertIn(b'"name": "b"', calls[0].args[0].data)
-            self.assertIn(b'"name": "a"', calls[1].args[0].data)
-            self.assertIsNone(calls[0].args[0].get_header('Authorization'))
-        with patch.object(clash_api, 'proxies') as inspect:
-            with self.assertRaises(ValueError):
-                clash_api.select(c, 'proxy_main', 'b', [])
-            inspect.assert_not_called()
 
 
 class PolicySchedulingTests(unittest.TestCase):
@@ -272,33 +212,26 @@ class PolicySchedulingTests(unittest.TestCase):
                 future.set_result(ProbeResult(Probe(kind), ok=True, **{'bytes': size, 'latency_ms': 50,
                                    'completed_at': self.now, **kw}))
 
-    def test_elective_test_priority_and_real_completion_before_write(self):
+    def assert_switch_waits_for_post_hold_throughput(self, managed, other):
+        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=[managed])
+        before, unmanaged = self.api[managed]['now'], self.api[other]['now']
         self.scheduler.tick()
-        self.write.assert_not_called()
         self.now += 300
         for s in self.scheduler.samples.values():
             s.last['gate'] = s.last['throttle'] = self.now-1
         self.scheduler.tick()
         self.assertIn((self.key('b'), 'throughput', self.scheduler.epoch), self.scheduler.jobs.values())
-        self.write.assert_not_called()
+        self.assertEqual(self.api[managed]['now'], before)  # No write before the result.
         self.finish('throughput', mbps=40)
         self.scheduler.tick()
-        self.assertEqual(self.api['proxy_main']['now'], 'b')
-        self.assertEqual(self.api['proxy_deepmind']['now'], 'chained')
+        self.assertEqual(self.api[managed]['now'], 'b')
+        self.assertEqual(self.api[other]['now'], unmanaged)
 
-    def test_preferred_return_executes_post_hold_throughput(self):
-        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['proxy_deepmind'])
-        self.scheduler.tick()
-        self.now += 300
-        for s in self.scheduler.samples.values():
-            s.last['gate'] = s.last['throttle'] = self.now-1
-        self.scheduler.tick()
-        self.assertIn((self.key('b'), 'throughput', self.scheduler.epoch), self.scheduler.jobs.values())
-        self.assertEqual(self.api['proxy_deepmind']['now'], 'chained')
-        self.finish('throughput', mbps=40)
-        self.scheduler.tick()
-        self.assertEqual(self.api['proxy_deepmind']['now'], 'b')
-        self.assertEqual(self.api['proxy_main']['now'], 'a')
+    def test_elective_switch_waits_for_post_hold_throughput(self):
+        self.assert_switch_waits_for_post_hold_throughput('proxy_main', 'proxy_deepmind')
+
+    def test_priority_return_waits_for_post_hold_throughput(self):
+        self.assert_switch_waits_for_post_hold_throughput('proxy_deepmind', 'proxy_main')
 
     def test_cancelled_challenger_throughput_is_requested_immediately(self):
         for discard in ('epoch_change', 'reload'):
