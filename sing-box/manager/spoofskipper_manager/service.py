@@ -156,7 +156,7 @@ class Manager:
             verified = self.write_and_reload(config)
             if verified:
                 self.hand_off(config, choices, managed)
-        except (OSError, ValueError):
+        except Exception:
             verified = False
         finally:
             if old is None and not verified:
@@ -264,20 +264,29 @@ class Manager:
                 last_logged = now
             self.scheduler_errors[error] = count, last_logged
 
+    def start_saved(self):
+        try:
+            saved = json.loads(self.live.read_text())
+            compiler.validate(saved)
+            self.start()
+            if self.verify(saved):
+                self.current = saved
+                remove(self.marker)
+                log('saved_config_started')
+                return
+        except (OSError, ValueError):
+            pass
+        # A stale saved config must not block a fresh render from /config.
+        log('saved_config_failed')
+        self.stop_child()
+
     def run(self):
         for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(number, self.signal)
         try:
             self.recover_interrupted()
             if self.live.exists():
-                saved = json.loads(self.live.read_text())
-                compiler.validate(saved)
-                self.start()
-                if not self.verify(saved):
-                    raise RecoveryFailed('saved configuration failed startup')
-                self.current = saved
-                remove(self.marker)
-                log('saved_config_started')
+                self.start_saved()
             pending = None
             try:
                 providers = Providers(self.config_dir, self.root, self.settings, log)

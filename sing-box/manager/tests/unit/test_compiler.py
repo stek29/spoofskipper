@@ -148,6 +148,40 @@ class CompilerTests(unittest.TestCase):
             self.assertTrue(m.marker.exists())
             self.assertEqual(json.loads(m.live.read_text()), old)
 
+    def test_failed_saved_config_falls_through_to_fresh_render(self):
+        with tempfile.TemporaryDirectory() as temp:
+            m = Manager(temp, Path(temp) / 'state')
+            saved = config()
+            saved['outbounds'].append({'type': 'direct', 'tag': compiler.REVISION_PREFIX + 'saved'})
+            write_json(m.live, saved)
+            with patch.object(m, 'start'), patch.object(m, 'verify', return_value=False), \
+                 patch.object(m, 'stop_child') as stop:
+                m.start_saved()
+            stop.assert_called_once()
+            self.assertIsNone(m.current)
+
+    def test_unexpected_handoff_error_rolls_back(self):
+        import http.client
+        from spoofskipper_manager.service import ActivationRolledBack
+        with tempfile.TemporaryDirectory() as temp:
+            m = Manager(temp, Path(temp) / 'state')
+            old = config()
+            old['outbounds'].append({'type': 'direct', 'tag': compiler.REVISION_PREFIX + 'old'})
+            new = copy.deepcopy(old)
+            new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX + 'new'
+            m.current = old
+            write_json(m.live, old)
+            m.child = type('Child', (), {'send_signal': lambda *args: None})()
+            with patch.object(compiler, 'check'), patch.object(m, 'alive', return_value=True), \
+                 patch.object(m, 'verify', return_value=True), patch.object(m, 'start'), \
+                 patch.object(m, 'stop_child'), patch.object(m, 'restore_choices'), \
+                 patch.object(m, 'hand_off', side_effect=http.client.BadStatusLine('x')):
+                with self.assertRaises(ActivationRolledBack):
+                    m.activate(new)
+            self.assertEqual(m.current, old)
+            self.assertFalse(m.marker.exists())
+            self.assertEqual(json.loads(m.live.read_text()), old)
+
     def test_rollback_recreates_probes_once_with_only_retained_ownership(self):
         from unittest.mock import Mock
         from spoofskipper_manager.service import ActivationRolledBack
