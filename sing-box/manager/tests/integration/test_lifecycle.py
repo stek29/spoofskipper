@@ -135,6 +135,25 @@ class LifecycleTests(LifecycleHarness):
         self.assertIsNone(self.proc.poll())
         self.assertNotIn('bootstrap_waiting_for_providers', self.logs())
 
+    def test_bootstrap_seed_starts_core_before_fetching(self):
+        # Providers are reachable only through the old core: seed first, then cut over offline.
+        seed = subprocess.run([sys.executable, '-m', 'spoofskipper_manager', 'bootstrap',
+            '--config-dir', str(self.config), '--state-dir', str(self.state)],
+            env={**os.environ, 'PYTHONPATH': str(MANAGER)}, capture_output=True, text=True, timeout=30)
+        self.assertEqual(seed.returncode, 0)
+        self.assertIn('bootstrap_completed', seed.stdout)
+        self.assertNotIn('secret@', seed.stdout + seed.stderr)
+        self.assertFalse((self.state / 'sing.json').exists())
+        self.mode = 'outage'
+        self.start()
+        self.ready()
+        self.assertIn('example_one', json.dumps(self.live()))
+        wait_for(lambda: 'provider_refresh_failed' in self.logs())
+        logs = self.logs()
+        self.assertLess(logs.index('activation_succeeded'), logs.index('provider_refresh_failed'))
+        self.assertNotIn('bootstrap_waiting_for_providers', logs)
+        self.assertIsNone(self.proc.poll())
+
     def test_zero_bootstrap_then_runtime_failure_retries_without_fetch(self):
         self.mode = 'empty'
         (self.config / 'config.jsonnet').write_text(self.source.rstrip() + ' + {runtime_fail: true}\n')

@@ -141,10 +141,15 @@ Slow paths read less, because throughput is time-boxed.
 ## Enable and disable
 
 1. Save the pre-cutover `docker-compose.yml`, `.env`, image tag and crontab.
-2. Disable only the subscription cron job and verify no refresh is running.
-3. Keep the existing loopback-reachable Clash API controller; authentication is
+2. While the old core still serves, seed provider snapshots with the new image:
+   `docker run --rm --network host -v ./config/sing:/config:ro -v ./data:/data <image> bootstrap`.
+   Without snapshots the first `serve` fetches before starting the core, which
+   deadlocks when provider egress depends on that core. `bootstrap` writes
+   nothing and exits nonzero unless every provider has a snapshot.
+3. Disable only the subscription cron job and verify no refresh is running.
+4. Keep the existing loopback-reachable Clash API controller; authentication is
    optional. Start with probes disabled and no managed selectors.
-4. Verify the revision and existing routes. Enable probes and `/reload` to observe
+5. Verify the revision and existing routes. Enable probes and `/reload` to observe
    `probe_sample` logs. Add selectors one at a time.
 
 A managed selector is flattened to proxy leaves while preserving its resolved
@@ -204,6 +209,7 @@ Core/Jsonnet error output is suppressed in logs to protect secrets.
 | `settings_invalid`, `cached_render_failed`, `refresh_failed` | Settings/render/fetch problem; saved state may still serve traffic |
 | `provider_refreshed`, `provider_refresh_failed` | Per-provider refresh result; failed providers retain last-good snapshots |
 | `bootstrap_waiting_for_providers` | No usable provider snapshot yet; retrying |
+| `bootstrap_completed`, `bootstrap_failed` | One-shot `bootstrap` seeded every provider, or wrote nothing (`missing` lists providers) |
 | `probe_sample`, `probe_failed`, `probe_discarded` | Measurement result, failure or invalidated result |
 | `uplink_down`, `uplink_restored` | Direct uplink check failed (probing paused) or recovered |
 | `probe_inspection_failed`, `scheduler_tick_failed` | Measurement/control error logged while the core remains running |

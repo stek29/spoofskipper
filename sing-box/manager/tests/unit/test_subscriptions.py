@@ -119,3 +119,13 @@ class SubscriptionTests(unittest.TestCase):
         (self.config / 'local-subs-config.json').write_text(json.dumps(self.specs))
         with self.assertRaises(ValueError):
             self.providers()
+
+    def test_bootstrap_seeds_all_providers_or_nothing(self):
+        log = lambda event, **fields: self.events.append((event, fields))
+        with patch.object(parser, 'fetch_url', lambda url: 1/0 if url.endswith('b') else 'trojan://s@localhost:443#one'):
+            self.assertEqual(subs.bootstrap(self.config, self.state, log), 1)
+        self.assertFalse((self.state / 'providers').exists())  # A partial seed would drop provider b.
+        self.assertEqual(self.events[-1], ('bootstrap_failed', {'missing': ['b']}))
+        with patch.object(parser, 'fetch_url', return_value='trojan://s@localhost:443#one'):
+            self.assertEqual(subs.bootstrap(self.config, self.state, log), 0)
+        self.assertEqual(set(self.providers().snapshots), {'a', 'b'})

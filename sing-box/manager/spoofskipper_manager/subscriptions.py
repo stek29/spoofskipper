@@ -80,3 +80,21 @@ class Providers:
         for prefix, snapshot in snapshots.items():
             write_json(self.path(prefix), snapshot)
         self.snapshots = dict(snapshots)
+
+
+def bootstrap(config_dir, state_dir, log):
+    """Seed snapshots for every provider, so the first serve starts the core before fetching.
+
+    Run once before cutover while the old core still provides egress. Nothing is
+    written unless every configured provider has a snapshot: a partial seed would
+    start the core without that provider's outbounds.
+    """
+    providers = Providers(config_dir, state_dir, Settings(), log)
+    pending = providers.refresh()
+    missing = [s['prefix'] for s in providers.config['subscriptions'] if s['prefix'] not in pending]
+    if missing:
+        log('bootstrap_failed', missing=missing)
+        return 1
+    providers.commit(pending)
+    log('bootstrap_completed', providers=sorted(pending))
+    return 0
