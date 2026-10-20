@@ -1,3 +1,4 @@
+from spoofskipper_manager.settings import Settings
 """Offline test-CA HTTPS faults through the pinned core and real protocol servers."""
 import base64
 import copy
@@ -280,7 +281,7 @@ class ProbeIntegrationTests(unittest.TestCase):
                 raise service.Stopping()
             real_wait(seconds)
         with patch.object(service.signal, 'signal'), patch.object(service, 'Providers', return_value=providers), \
-             patch.object(service, 'load_settings', return_value=settings), \
+             patch.object(service, 'load_settings', return_value=Settings.from_mapping(settings)), \
              patch.object(manager, 'prepare', side_effect=[old, new]), \
              patch.object(manager.scheduler, 'tick', side_effect=checked_tick), patch.object(manager, 'wait', side_effect=wait):
             self.assertEqual(manager.run(), 0)

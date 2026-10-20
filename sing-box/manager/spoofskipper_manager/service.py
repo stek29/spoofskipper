@@ -27,6 +27,10 @@ class RecoveryFailed(Exception):
     pass
 
 
+class ActivationRolledBack(ValueError):
+    """The old core is verified; its measurement client must be recreated."""
+
+
 class Manager:
     def __init__(self, config_dir, state_dir, core='sing-box'):
         self.config_dir, self.root, self.core = Path(config_dir), Path(state_dir), core
@@ -130,32 +134,17 @@ class Manager:
         if self.current == config and self.alive():
             log('activation_unchanged', revision=compiler.revision(config))
             return
-        choices, selections = {}, {}
-        managed = self.settings.get('managed_selectors', [])
-        if self.current is not None and managed:
-            # Inspection must succeed before an ownership-changing activation.
-            live = clash_api.proxies(self.current)
-            choices = {tag: resolve(live, tag) for tag in managed if tag in live}
-            selections = {tag: live[tag].get('now') for tag in choices}
+        managed = self.settings.managed_selectors
+        choices, selections = self.capture_choices(managed)
         old = self.current
         if old is not None:
             atomic_write(self.previous, self.live.read_bytes())
             atomic_write(self.marker, 'activating\n')
         verified = False
         try:
-            write_json(self.live, config)
-            self.scheduler.invalidate()
-            if self.alive():
-                self.child.send_signal(signal.SIGHUP)
-            else:
-                self.start()
-            verified = self.verify(config)
+            verified = self.write_and_reload(config)
             if verified:
-                entries = {o['tag']: o for o in config.get('outbounds', [])}
-                for tag, leaf in choices.items():
-                    if leaf in entries.get(tag, {}).get('outbounds', []):
-                        clash_api.select(config, tag, leaf, managed)
-                        log('selector_handoff', selector=tag, candidate=leaf)
+                self.hand_off(config, choices, managed)
         except (OSError, ValueError):
             verified = False
         finally:
@@ -172,6 +161,33 @@ class Manager:
             # Failed first installation is not a saved, usable configuration.
             remove(self.live)
             raise ValueError('initial core startup failed')
+        self.roll_back(old, selections, managed)
+        raise ActivationRolledBack('new configuration rolled back')
+
+    def capture_choices(self, managed):
+        if self.current is None or not managed:
+            return {}, {}
+        proxies = clash_api.proxies(self.current)
+        choices = {tag: resolve(proxies, tag) for tag in managed if tag in proxies}
+        return choices, {tag: proxies[tag].get('now') for tag in choices}
+
+    def write_and_reload(self, config):
+        write_json(self.live, config)
+        self.scheduler.invalidate()
+        if self.alive():
+            self.child.send_signal(signal.SIGHUP)
+        else:
+            self.start()
+        return self.verify(config)
+
+    def hand_off(self, config, choices, managed):
+        entries = {outbound['tag']: outbound for outbound in config.get('outbounds', [])}
+        for tag, leaf in choices.items():
+            if leaf in entries.get(tag, {}).get('outbounds', []):
+                clash_api.select(config, tag, leaf, managed)
+                log('selector_handoff', selector=tag, candidate=leaf)
+
+    def roll_back(self, old, selections, managed):
         atomic_write(self.live, self.previous.read_bytes())
         # Restart once: handles both a surviving old instance and a dead new one.
         self.stop_child()
@@ -183,24 +199,35 @@ class Manager:
         if not recovered:
             log('rollback_failed')
             raise RecoveryFailed('bounded rollback failed')
-        # Recover previous owned choices too, without writing any selector that
-        # has been removed from managed_selectors.
-        entries = {o['tag']: o for o in old.get('outbounds', [])}
+        self.restore_choices(old, selections, managed)
+        self.current = old
+        remove(self.marker)
+        log('rollback_succeeded', revision=compiler.revision(old))
+
+    def restore_choices(self, config, selections, managed):
+        # Never restore a selector whose ownership has been revoked.
+        entries = {outbound['tag']: outbound for outbound in config.get('outbounds', [])}
         for tag, selection in selections.items():
             if selection in entries.get(tag, {}).get('outbounds', []):
                 try:
-                    clash_api.select(old, tag, selection, managed)
+                    clash_api.select(config, tag, selection, managed)
                 except Exception:
                     log('selector_rollback_failed', selector=tag)
                     raise RecoveryFailed('selector recovery failed') from None
-        self.current = old
-        remove(self.marker)
-        if self.scheduler.config is not None:
-            safe = self.scheduler.settings.with_changes(managed_selectors=tuple(
-                tag for tag in self.scheduler.settings.managed_selectors if tag in managed))
-            self.scheduler.configure(old, list(self.scheduler.candidates.values()), safe)
-        log('rollback_succeeded', revision=compiler.revision(old))
-        raise ValueError('new configuration rolled back')
+
+    def activate_and_configure(self, config, providers, snapshots):
+        previous_settings = self.scheduler.settings
+        previous_candidates = list(self.scheduler.candidates.values())
+        try:
+            self.activate(config)
+        except ActivationRolledBack:
+            if self.scheduler.config is not None:
+                owned = tuple(tag for tag in previous_settings.managed_selectors
+                              if tag in self.settings.managed_selectors)
+                self.scheduler.configure(self.current, previous_candidates,
+                                         previous_settings.with_changes(managed_selectors=owned))
+            raise
+        self.configure_probes(providers, snapshots)
 
     def prepare(self, snapshots, providers):
         with tempfile.TemporaryDirectory(prefix='.manager-', dir=self.root) as scratch:
@@ -232,8 +259,7 @@ class Manager:
                 providers = Providers(self.config_dir, self.root, self.settings, log)
                 if providers.snapshots:
                     pending = dict(providers.snapshots)
-                    self.activate(self.prepare(pending, providers))
-                    self.configure_probes(providers, pending)
+                    self.activate_and_configure(self.prepare(pending, providers), providers, pending)
                     pending = None
             except (Stopping, RecoveryFailed):
                 raise
@@ -268,8 +294,7 @@ class Manager:
                             self.wait(backoff)
                             backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
                             continue
-                        self.activate(self.prepare(pending, providers))
-                        self.configure_probes(providers, pending)
+                        self.activate_and_configure(self.prepare(pending, providers), providers, pending)
                         providers.commit(pending)
                         pending = None
                         backoff = self.settings['bootstrap_backoff_seconds']

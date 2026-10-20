@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api, compiler, service
+from spoofskipper_manager.settings import Settings
 from spoofskipper_manager.probes import THROTTLE, sample_key
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.state import write_json
@@ -85,7 +86,7 @@ class RefreshFailureTests(unittest.TestCase):
                 return atomic_write(*args)
             with patch.object(service.signal, 'signal'), \
                  patch.object(service, 'Providers', return_value=providers), \
-                 patch.object(service, 'load_settings', return_value=settings), \
+                 patch.object(service, 'load_settings', return_value=Settings.from_mapping(settings)), \
                  patch.object(manager, 'start'), patch.object(manager, 'stop_child'), \
                  patch.object(manager, 'alive', return_value=True), patch.object(manager, 'verify', return_value=True), \
                  patch.object(manager, 'prepare', side_effect=prepared), patch.object(compiler, 'check'), \
