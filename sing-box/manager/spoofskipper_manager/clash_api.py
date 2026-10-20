@@ -1,4 +1,4 @@
-"""Loopback Clash inspection and verified, explicitly owned selector writes."""
+"""Clash API inspection and verified, explicitly owned selector writes."""
 import ipaddress
 import json
 import urllib.request
@@ -16,13 +16,10 @@ def credentials(config):
             raise ValueError()
         if host in ('', 'localhost'):
             host = '127.0.0.1'  # An empty host listens on all interfaces.
-        ip = ipaddress.ip_address(host)
-        if ip.is_unspecified:
-            host = '::1' if ip.version == 6 else '127.0.0.1'
-        elif not ip.is_loopback:
-            raise ValueError()
+        elif ipaddress.ip_address(host).is_unspecified:
+            host = '::1' if ':' in host else '127.0.0.1'
     except (ValueError, AttributeError):
-        raise ValueError('render requires a loopback-reachable Clash API with an optional string secret') from None
+        raise ValueError('render requires a Clash API address (an IP and port) with an optional string secret') from None
     return f'http://[{host}]:{port}' if ':' in host else f'http://{host}:{port}', secret
 
 

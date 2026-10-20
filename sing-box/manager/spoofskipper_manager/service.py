@@ -43,20 +43,22 @@ class Manager:
         for directory in (self.root, self.root / 'providers'):
             for path in directory.glob('.manager-*'):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
-        try:
-            self.settings = load_settings(self.config_dir)
-        except (ValueError, OSError):
-            if not self.live.exists():
-                raise
-            self.settings = Settings()
-            log('settings_invalid_using_saved_config', probes_enabled=False, managed_selectors=[],
-                fallback='native_selectors')
+        self.settings = self.read_settings()
         self.child = None
         self.stopping = None
         self.reload_requested = False
         self.current = None
         self.scheduler = Scheduler(log)
         self.scheduler_errors = {}
+
+    def read_settings(self):
+        # Invalid manager settings must not block routing or subscription refresh:
+        # fall back to no probes and no selector ownership until they are fixed.
+        try:
+            return load_settings(self.config_dir)
+        except (ValueError, OSError):
+            log('settings_invalid', probes_enabled=False, managed_selectors=[], fallback='native_selectors')
+            return Settings()
 
     def load_api_secret(self):
         # Stable across restarts so unchanged renders keep the same revision.
@@ -314,11 +316,11 @@ class Manager:
                     reload_only = self.reload_requested
                     self.reload_requested = False
                     try:
-                        self.settings = load_settings(self.config_dir)
+                        self.settings = self.read_settings()
                         self.scheduler.restrict(self.settings)
                         providers = Providers(self.config_dir, self.root, self.settings, log)
                         if pending is None:
-                            pending = dict(providers.snapshots) if reload_only else providers.refresh()
+                            pending = dict(providers.snapshots) if reload_only else providers.refresh(self.tick_scheduler)
                             fetched = not reload_only
                         if not pending and providers.configured:
                             log('bootstrap_waiting_for_providers')

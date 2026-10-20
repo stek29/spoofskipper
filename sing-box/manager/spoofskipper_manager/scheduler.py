@@ -204,7 +204,12 @@ class Scheduler:
             except Exception as exc:
                 self.log('probe_inspection_failed', error=type(exc).__name__)
             self.last_inspect = now
-        self.controller.apply_policy(now)
+        try:
+            self.controller.apply_policy(now)
+            policy_error = None
+        except Exception as exc:
+            # A policy fault must not stop measurements; it is re-raised below for logging.
+            self.requested, policy_error = {}, exc
         busy = {key for key, _, _ in self.jobs.values()}
         gates = sum(probe is Probe.GATE for _, probe, _ in self.jobs.values())
         # Gates run in parallel; body probes download one at a time.
@@ -232,3 +237,5 @@ class Scheduler:
                 sample.confirm = None
             future = self.pool.submit(self.perform, self.client, self.config, candidate, probe)
             self.jobs[future] = (key, probe, self.epoch)
+        if policy_error is not None:
+            raise policy_error

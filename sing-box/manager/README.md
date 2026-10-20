@@ -17,16 +17,16 @@ provider snapshots. Keep private inputs out of version control.
 is no longer supported; use `/config/sing.jsonnet` or the CLI `--config-dir`.
 Keep Compose's stop grace period greater than `shutdown_timeout`.
 
-The manager verifies activations through the Clash API. A configured
-`external_controller` must be loopback-reachable (an empty host such as `:9090`
-counts). Without one, the manager adds `127.0.0.1:<clash_api_port>` with a
+The manager verifies activations through the Clash API. It connects to the
+configured `external_controller` (loopback for an empty or unspecified host such
+as `:9090`). Without one, the manager adds `127.0.0.1:<clash_api_port>` with a
 secret generated once and kept in `/data/clash-api-secret`.
 
 ## Settings
 
 Missing `local-manager.json` means probes disabled and no selector ownership.
-Invalid settings at restart use the saved config with probes and ownership
-explicitly disabled; `settings_invalid_using_saved_config` records that fallback.
+Invalid settings disable probes and ownership until fixed, while rendering and
+subscription refresh continue; `settings_invalid` records that fallback.
 Settings are validated on load. Cadences/deadlines below are positive seconds.
 
 | Setting | Default | Meaning |
@@ -181,7 +181,7 @@ Core/Jsonnet error output is suppressed in logs to protect secrets.
 | `activation_failed`, `revision_timeout`, `rollback_succeeded` | New config failed; inspect recovery outcome |
 | `rollback_failed`, `selector_rollback_failed`, `unexpected_core_exit` | Recovery failed or core died; investigate before rollout |
 | `interrupted_activation_restored` | Interrupted activation recovered from previous JSON |
-| `settings_invalid_using_saved_config`, `cached_render_failed`, `refresh_failed` | Settings/render/fetch problem; saved state may still serve traffic |
+| `settings_invalid`, `cached_render_failed`, `refresh_failed` | Settings/render/fetch problem; saved state may still serve traffic |
 | `provider_refreshed`, `provider_refresh_failed` | Per-provider refresh result; failed providers retain last-good snapshots |
 | `bootstrap_waiting_for_providers` | No usable provider snapshot yet; retrying |
 | `probe_sample`, `probe_failed`, `probe_discarded` | Measurement result, failure or invalidated result |

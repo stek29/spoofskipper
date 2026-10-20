@@ -36,9 +36,11 @@ class SubscriptionTests(unittest.TestCase):
                 raise ValueError('private-url-do-not-log')
             return 'trojan://secret@localhost:443#one'
         first = self.providers()
+        ticks = []
         with patch.object(parser, 'fetch_url', fetch):
-            pending = first.refresh()
+            pending = first.refresh(lambda: ticks.append(1))
         self.assertEqual(list(pending), ['a'])
+        self.assertEqual(len(ticks), 2)  # Probing continues after each provider.
         self.assertFalse(first.path('a').exists())
         first.commit(pending)
         old_age = pending['a']['fetched_at']

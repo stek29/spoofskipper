@@ -76,6 +76,15 @@ class MeasurementSafetyTests(unittest.TestCase):
             finally:
                 manager.scheduler.close()
 
+    def test_policy_error_does_not_stop_measurements(self):
+        from concurrent.futures import Future
+        self.scheduler.last_inspect = 1000.
+        with patch.object(self.scheduler.controller, 'apply_policy', side_effect=KeyError('bug')), \
+             patch.object(self.scheduler.pool, 'submit', side_effect=lambda *args: Future()):
+            with self.assertRaises(KeyError):
+                self.scheduler.tick()
+        self.assertTrue(self.scheduler.jobs)  # Gates were still submitted.
+
     def test_stop_during_first_verification_removes_unverified_config(self):
         with tempfile.TemporaryDirectory() as temp:
             manager = service.Manager(temp, Path(temp) / 'state')
@@ -92,8 +101,7 @@ class MeasurementSafetyTests(unittest.TestCase):
 
     def test_invalid_settings_explicitly_disable_probes_and_writes(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_json(root / 'sing.json', self.config)
+            root = Path(temp)  # No saved config: invalid settings must not block a first start.
             (root / 'local-manager.json').write_text('{')
             (root / 'providers').mkdir()
             (root / 'providers' / '.manager-abandoned').write_text('secret')
@@ -104,7 +112,7 @@ class MeasurementSafetyTests(unittest.TestCase):
                 self.assertEqual(manager.settings['managed_selectors'], ())
                 self.assertIn('probe_timeout', manager.settings)
                 self.assertFalse((root / 'providers' / '.manager-abandoned').exists())
-                log.assert_called_once_with('settings_invalid_using_saved_config',
+                log.assert_called_once_with('settings_invalid',
                     probes_enabled=False, managed_selectors=[], fallback='native_selectors')
             finally:
                 manager.scheduler.close()

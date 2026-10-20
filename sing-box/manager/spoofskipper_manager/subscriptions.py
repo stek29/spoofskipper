@@ -43,7 +43,8 @@ class Providers:
     def path(self, prefix):
         return self.root / (hashlib.sha256(prefix.encode()).hexdigest() + '.json')
 
-    def refresh(self):
+    def refresh(self, between=lambda: None):
+        """Fetch every provider; between() runs after each so probing and failover continue."""
         pending = dict(self.snapshots)
         global_settings, type_settings = read_outbound_settings(self.config)
         for spec in self.config['subscriptions']:
@@ -60,6 +61,7 @@ class Providers:
                 self.log('provider_refresh_failed', provider=prefix, error=type(exc).__name__,
                          snapshot_age_seconds=time.time() - old['fetched_at'] if old else None,
                          missing=old is None)
+            between()
         return pending
 
     def merged(self, snapshots):

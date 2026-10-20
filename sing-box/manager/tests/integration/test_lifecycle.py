@@ -188,11 +188,14 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.proc.wait(timeout=4), 1)
         self.assertIn('unexpected_core_exit', self.logs())
 
-    def test_bad_api_refused_without_starting(self):
+    def test_unusable_api_address_fails_activation_without_saving(self):
         (self.config / 'config.jsonnet').write_text(self.source.replace("external_controller: '127.0.0.1:", "external_controller: '192.0.2.1:"))
         self.start()
         wait_for(lambda: 'refresh_failed' in self.logs())
-        self.assertNotIn('core_started', self.logs())
+        self.assertIn('activation_failed', self.logs())
+        self.assertNotIn('activation_succeeded', self.logs())
+        self.assertFalse((self.state / 'sing.json').exists())
+        self.assertIsNone(self.proc.poll())
 
     def test_term_interrupts_stalled_subscription_read(self):
         self.start()
