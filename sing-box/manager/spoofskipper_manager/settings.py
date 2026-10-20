@@ -14,6 +14,8 @@ CHALLENGE_RETRY_SECONDS = 1800  # retry of a failed or stale challenger test
 SHORTLIST_SIZE = 3  # standbys per provider that get throughput tests
 FRESH_SAMPLE_SECONDS = 30
 INSPECT_SECONDS = 5
+UPLINK_FRESH_SECONDS = 30  # a working uplink check covers failures for this long
+UPLINK_RETRY_SECONDS = 10  # recheck interval while the uplink is down
 SCHEDULER_ERROR_LOG_SECONDS = 60
 # Policy invariants, deliberately fixed rather than operator-tunable cadences.
 HOLD = 300
@@ -23,6 +25,8 @@ MARGIN = 1.15
 DEFAULT_PROBE_URLS = ('https://speed.cloudflare.com/__down?bytes={bytes}',
                       'https://proof.ovh.net/files/100Mb.dat',
                       'https://nbg1-speed.hetzner.com/100MB.bin')
+# Reached directly, never through a proxy: any HTTP response means the uplink works.
+DEFAULT_UPLINK_URLS = ('https://ya.ru/', 'https://yastatic.net/')
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,7 @@ class Settings:
     throttle_seconds: float = 300
     throughput_active_seconds: float = 3600
     throughput_shortlist_seconds: float = 21600
+    throughput_rotation_seconds: float = 14400
     probe_timeout: float = 15
     probe_stall_timeout: float = 2
     throughput_seconds: float = 4
@@ -48,11 +53,13 @@ class Settings:
     provider_weights: Mapping[str, float] = field(default_factory=dict)
     selector_priorities: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
     probe_urls: tuple[str, ...] = DEFAULT_PROBE_URLS
+    uplink_urls: tuple[str, ...] = DEFAULT_UPLINK_URLS
     probe_ca_bundle: str | None = None
 
     def __post_init__(self):
         object.__setattr__(self, 'managed_selectors', tuple(self.managed_selectors))
         object.__setattr__(self, 'probe_urls', tuple(self.probe_urls))
+        object.__setattr__(self, 'uplink_urls', tuple(self.uplink_urls))
         object.__setattr__(self, 'provider_weights', MappingProxyType(dict(self.provider_weights)))
         object.__setattr__(self, 'selector_priorities', MappingProxyType({
             tag: tuple(tuple(tier) for tier in tiers)
@@ -113,15 +120,19 @@ def load_settings(config_dir):
         raise ValueError('probe_port and clash_api_port must differ')
     if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
         raise ValueError('probe deadlines exceed bounded maximum')
+    if 'probe_url' in settings:
+        raise ValueError('probe_url was renamed to probe_urls (a list)')
     urls = settings.get('probe_urls', list(DEFAULT_PROBE_URLS))
-    if (not isinstance(urls, list) or not urls or len(set(urls)) != len(urls)
-            or any(not isinstance(url, str) for url in urls)):
-        raise ValueError('probe_urls must be a non-empty list of distinct URLs')
+    uplinks = settings.get('uplink_urls', list(DEFAULT_UPLINK_URLS))
+    for name, value, minimum in (('probe_urls', urls, 1), ('uplink_urls', uplinks, 0)):
+        if (not isinstance(value, list) or any(not isinstance(url, str) for url in value)
+                or len(value) < minimum or len(set(value)) != len(value)):
+            raise ValueError(f'{name} must be a list of distinct URLs')
     if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
         raise ValueError('probe_ca_bundle must be a file path')
     if settings.get('probes_enabled', False):
         ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
-        for url in map(urlsplit, urls):
+        for url in map(urlsplit, urls + uplinks):
             if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
                 raise ValueError('probe endpoint must be HTTPS')
     return Settings.from_mapping(settings)

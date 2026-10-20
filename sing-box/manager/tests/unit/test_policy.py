@@ -122,7 +122,7 @@ class PolicyTests(unittest.TestCase):
         self.sample('a').health = Health.FAILED
         self.assertEqual(self.decide(selector='proxy_deepmind').reason, 'health_failover')
 
-    def test_return_to_preferred_needs_one_post_hold_throughput_and_no_margin(self):
+    def test_return_to_preferred_needs_fresh_post_hold_proof_and_no_margin(self):
         self.sample('b').health = Health.FAILED
         self.sample('a').successes = [(1000, .1, 500)]  # Far below the chained path's score.
         self.assertEqual(self.decide('chained', 'proxy_deepmind').reason, 'hold')
@@ -130,7 +130,7 @@ class PolicyTests(unittest.TestCase):
         d = self.decide('chained', 'proxy_deepmind')
         self.assertEqual(d.reason, 'priority_return_test')
         self.assertEqual(d.tests, ((key('a'), Probe.THROUGHPUT),))
-        self.sample('a').successes = [(1301, .1, 500)]
+        self.sample('a').threshold_at = 1301  # From the primary or a fallback endpoint.
         self.now = 1301
         d = self.decide('chained', 'proxy_deepmind')
         self.assertEqual((d.target, d.reason), (key('a'), 'priority_return'))

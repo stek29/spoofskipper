@@ -40,6 +40,10 @@ class ProbeIntegrationTests(unittest.TestCase):
                         pass
                     return
                 query = parse_qs(urlsplit(self.path).query)
+                if 'bytes' not in query and 'Range' not in self.headers:  # An uplink check.
+                    self.send_response(204)
+                    self.end_headers()
+                    return
                 if 'bytes' in query:
                     if owner.mode == 'primary_down':
                         self.send_error(503)
@@ -219,6 +223,16 @@ class ProbeIntegrationTests(unittest.TestCase):
             self.assertTrue(sample.healthy)
         finally:
             scheduler.close()
+
+    def test_uplink_check_goes_direct_and_any_response_counts(self):
+        uplink = f'https://localhost:{self.server.server_port}/'
+        self.client.settings = self.client.settings.with_changes(uplink_urls=(uplink,))
+        self.assertTrue(self.client.uplink_up())
+        closed = f'https://localhost:{free_port()}/'
+        self.client.settings = self.client.settings.with_changes(uplink_urls=(closed,))
+        self.assertFalse(self.client.uplink_up())
+        self.client.settings = self.client.settings.with_changes(uplink_urls=(closed, uplink))
+        self.assertTrue(self.client.uplink_up())
 
     def test_fallback_endpoint_reads_a_range_of_a_static_file(self):
         self.mode = 'primary_down'

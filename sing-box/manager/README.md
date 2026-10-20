@@ -44,7 +44,8 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `gate_standby_seconds` | 480 | Standby-path gate interval |
 | `throttle_seconds` | 300 | Active-path threshold check interval |
 | `throughput_active_seconds` | 3600 | Active throughput interval |
-| `throughput_shortlist_seconds` | 21600 | Throughput interval for the 3 lowest-latency healthy standbys per provider |
+| `throughput_shortlist_seconds` | 21600 | Throughput interval for the 3 best-scored healthy standbys per provider |
+| `throughput_rotation_seconds` | 14400 | Interval of one extra throughput test per provider on its least recently tested other standby |
 | `probe_workers` | 4 | Concurrent gates, integer 1–4; body checks/downloads are serial |
 | `probe_port` | 19090 | Loopback mixed inbound port, integer 1–65535 |
 | `clash_api_port` | 19089 | Loopback Clash API port added when the config has no `external_controller` |
@@ -52,6 +53,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_stall_timeout` | 2 | Body stall deadline |
 | `throughput_seconds` | 4 | Throughput body time box after headers, maximum 4 |
 | `probe_urls` | Cloudflare `__down`, then OVH and Hetzner 100 MiB files | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
+| `uplink_urls` | `https://ya.ru/`, `https://yastatic.net/` | HTTPS URLs reached directly, never through a proxy; empty disables the uplink check |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch.
@@ -73,13 +75,13 @@ before a local proxy. Providers outside an explicit tier list are excluded.
 
 Every probe is one HTTPS request through the path, differing only in size. A URL
 with a `{bytes}` placeholder is asked for exactly that many bytes; a URL without
-one must be a static file of at least 16 MiB, read with a `Range` request.
+one must be a static file of at least 9 MiB, read with a `Range` request.
 
 | Probe | Body | Proves |
 |---|---|---|
 | `gate` | 1 byte | Reachability and latency |
 | `throttle` | 256 KiB | The connection keeps working past the throttling threshold |
-| `throughput` | up to 16 MiB | Rate after the first 1 MiB; also passes the threshold |
+| `throughput` | up to 9 MiB | Rate after the first 1 MiB; also passes the threshold |
 
 A path is healthy only after a `throttle` or `throughput` probe reads past 256 KiB.
 Gates keep proven health fresh but cannot make an unknown or failed path healthy,
@@ -89,7 +91,15 @@ the path is failed once every endpoint failed in a row (two attempts with a
 single endpoint), so an outage or block of one endpoint does not fail working
 paths. Only the first endpoint's latency and
 throughput are scored, keeping scores comparable; while it is unreachable,
-paths stay healthy through the fallback but their scores age out. A failed path that answers a gate gets one `throttle` re-check per gate.
+paths stay healthy through the fallback but their scores age out, so only
+failover and priority returns (which accept fallback proof) still switch. A
+failed path that answers a gate gets one `throttle` re-check per gate.
+
+A probe failure counts only after a direct request to one of `uplink_urls`
+succeeds (any HTTP response; a success within the last 30 seconds is reused).
+If none answers, the uplink is down: failures are dropped, probing and policy
+pause, and the uplink is rechecked every 10 seconds until it returns. This keeps
+a local outage from failing every path and reshuffling selectors afterwards.
 
 A higher tier must be failed before a lower tier is eligible. Unknown health
 requests gates first. Failure of the active path bypasses the hold and score
@@ -102,14 +112,17 @@ The five-minute elective hold and 15% improvement margin are fixed policy rules,
 not configurable cadences. Scores use the last three successful throughput/latency
 samples, capped at 100 Mbps and weighted by provider. Active scores expire after
 two hours, standby scores after two days. Every elective switch, including a
-return to a higher tier (which skips the margin), requires a `throughput` result
-taken after the hold and no older than 30 seconds. A failed or stale challenge is
+switch requires a `throughput` result taken after the hold and no older than 30
+seconds. A return to a higher tier skips the margin and accepts any fresh proof
+past the threshold from that request, including a fallback endpoint's. A failed or stale challenge is
 retried after 30 minutes. Attempts cancelled by a reload or selector write can be
 retried immediately; upstream-change and worker-error discards retain their
 normal scheduling timestamps.
 
-Throughput runs only on active paths and on the three lowest-latency healthy
-standbys of each provider. It skips 1 MiB (TCP slow start), then reads for at
+Throughput runs on active paths and on the three best-scored healthy standbys of
+each provider (unscored ones by latency). Every four hours, one more standby per
+provider, the least recently tested, gets a throughput test, so every healthy
+path is eventually scored and can enter the shortlist. It skips 1 MiB (TCP slow start), then reads for at
 most four seconds after the response headers, stopping early at 8 MiB scored or
 once 4 MiB show a rate above 100 Mbps. Native URLTest checks remain independently active.
 
@@ -119,6 +132,7 @@ Approximate probe traffic with default cadences, for fast paths:
 |---|---|
 | Each active path | up to about 290 MiB/day (throttle every 5 min, throughput hourly, at most 9 MiB each) |
 | Each provider's 3 shortlisted standbys | up to about 108 MiB/day together |
+| Each provider's rotation | up to about 54 MiB/day |
 | Gates | a TLS handshake each: every minute (active) or 8 minutes (standby) |
 | Failed paths that still answer gates | one `throttle` attempt per gate; throttled paths usually stall within tens of KiB |
 
@@ -191,6 +205,7 @@ Core/Jsonnet error output is suppressed in logs to protect secrets.
 | `provider_refreshed`, `provider_refresh_failed` | Per-provider refresh result; failed providers retain last-good snapshots |
 | `bootstrap_waiting_for_providers` | No usable provider snapshot yet; retrying |
 | `probe_sample`, `probe_failed`, `probe_discarded` | Measurement result, failure or invalidated result |
+| `uplink_down`, `uplink_restored` | Direct uplink check failed (probing paused) or recovered |
 | `probe_inspection_failed`, `scheduler_tick_failed` | Measurement/control error logged while the core remains running |
 | `selector_decision`, `selector_switched`, `selector_handoff`, `selector_write_failed` | Policy reason, verified write or write failure |
 | `shutdown_requested`, `manager_failed` | Requested shutdown or startup failure |

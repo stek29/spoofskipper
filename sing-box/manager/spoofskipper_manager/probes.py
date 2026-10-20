@@ -10,22 +10,24 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from .identity import identity
+from .identity import UPLINK, identity
 from .settings import Settings
 
 # Throttling middleboxes let small responses through and stall the connection
 # after a few dozen KiB, so health is proven only past THROTTLE bytes.
-THROTTLE, SKIP, TOTAL = 256 * 1024, 1024 * 1024, 16 * 1024 * 1024
+THROTTLE, SKIP = 256 * 1024, 1024 * 1024
 # Throughput is scored up to RATE_CAP_MBPS: a sample stops at SCORED_MAX bytes
 # after SKIP (slow start), or once EVIDENCE bytes show a rate above the cap.
+# Requests ask for no more than is read (Cloudflare also refuses some larger sizes).
 RATE_CAP_MBPS, SCORED_MAX, EVIDENCE = 100, 8 * 1024 * 1024, 4 * 1024 * 1024
+TOTAL = SKIP + SCORED_MAX
 
 
 class Probe(str, Enum):
     """One request per probe; the kinds differ only in their byte budget."""
     GATE = 'gate'              # 1 byte: reachability and latency
     THROTTLE = 'throttle'      # 256 KiB: the connection survives the threshold
-    THROUGHPUT = 'throughput'  # up to 16 MiB: rate after the first 1 MiB
+    THROUGHPUT = 'throughput'  # up to 9 MiB: rate after the first 1 MiB
 
     @property
     def budget(self):
@@ -149,6 +151,30 @@ class ProbeClient:
                         connection.io_socket.shutdown(socket.SHUT_RDWR)
                     except OSError:
                         pass
+
+    def uplink_up(self):
+        """Whether any uplink URL answers over direct egress; any HTTP response counts."""
+        for url in self.settings.uplink_urls:
+            connection = None
+            try:
+                target = urlsplit(url)
+                connection = _Connection(self, self.clock() + self.settings.probe_timeout)
+                user, password = identity(UPLINK)
+                connection.set_tunnel(target.hostname, target.port or 443, headers={
+                    'Proxy-Authorization': 'Basic ' + base64.b64encode(f'{user}:{password}'.encode()).decode()})
+                with self.lock:
+                    self.connections.add(connection)
+                connection.request('GET', target.path or '/', headers={'Connection': 'close'})
+                connection.getresponse().close()
+                return True
+            except (OSError, ValueError, http.client.HTTPException):
+                continue
+            finally:
+                if connection:
+                    connection.close()
+                    with self.lock:
+                        self.connections.discard(connection)
+        return False
 
     def run(self, outbound, probe, endpoint=0):
         probe = Probe(probe)

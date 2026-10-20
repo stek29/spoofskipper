@@ -23,7 +23,10 @@ INVALID = [
     {'probe_timeout': 16},
     *({'probes_enabled': True, 'probe_urls': urls}
       for urls in ('https://example.test/', [], ['http://example.test/?bytes={bytes}'],
-                   ['https://example.test/'] * 2, [1])),
+                   ['https://example.test/'] * 2, [1], [['https://example.test/']])),
+    *({'probes_enabled': True, 'uplink_urls': urls}
+      for urls in ('https://ya.ru/', ['http://ya.ru/'], [{}])),
+    {'probe_url': 'https://example.test/?bytes={bytes}'},  # Renamed to probe_urls.
 ]
 
 

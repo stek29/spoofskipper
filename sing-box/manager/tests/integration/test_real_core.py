@@ -55,7 +55,8 @@ class RealCoreTests(test_lifecycle.LifecycleHarness):
         write_json(self.config / 'local-manager.json', self.settings)
         self.start()
         self.ready()
-        wait_for(lambda: 'probe_failed' in self.logs())
+        # The harness has no egress: probes fail, then so does the direct uplink check.
+        wait_for(lambda: 'uplink_down' in self.logs())
         pid = self.proc.pid
         first = self.live()
         selectors = [o for o in first['outbounds'] if o['type'] in ('selector', 'urltest')]

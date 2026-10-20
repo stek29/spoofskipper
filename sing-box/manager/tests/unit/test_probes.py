@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
 from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult
-from spoofskipper_manager.identity import sample_key
+from spoofskipper_manager.identity import UPLINK, sample_key
 from spoofskipper_manager.scheduler import Health, Scheduler
 from spoofskipper_manager.policy import score
 
@@ -35,7 +35,7 @@ class SchedulingTests(unittest.TestCase):
 
     def complete(self, **extra):
         for future, args in self.submissions:
-            if not future.done():
+            if not future.done() and len(args) > 1:  # Not an uplink check.
                 probe = Probe(args[-1])
                 size = {Probe.GATE: 1, Probe.THROTTLE: THROTTLE, Probe.THROUGHPUT: THROTTLE + SKIP}[probe]
                 fields = {'bytes': size, 'latency_ms': 30, **extra}
@@ -84,20 +84,57 @@ class SchedulingTests(unittest.TestCase):
         self.scheduler.tick()
         self.assertTrue(any(e == 'probe_discarded' for e, _ in self.logs))
 
-    def test_only_the_lowest_latency_standbys_get_throughput_tests(self):
-        for i, sample in enumerate(self.scheduler.samples.values()):
-            sample.health, sample.latency = Health.HEALTHY, 10+i
+    def test_shortlist_ranks_by_score_and_rotation_reaches_the_rest(self):
+        samples = {k.tag: s for k, s in self.scheduler.samples.items()}
+        for i, sample in enumerate(samples.values()):
+            sample.health, sample.healthy_at, sample.latency = Health.HEALTHY, self.now, 10+i
             sample.last['gate'] = self.now
-        shortlisted = self.scheduler.shortlist()
-        self.assertEqual(sorted(k.tag for k in shortlisted), ['c0', 'c1', 'c2'])
+        samples['c5'].successes = [(self.now, 90, 15)]  # Fast but slow to answer.
+        samples['c4'].successes = [(self.now, 30, 14)]
+        shortlisted = self.scheduler.shortlist(self.now)
+        self.assertEqual(sorted(k.tag for k in shortlisted), ['c0', 'c4', 'c5'])
+        rotation = self.scheduler.rotation(shortlisted, self.now)
+        self.assertEqual([k.tag for k in rotation], ['c1'])  # Never tested, lowest latency.
         self.scheduler.tick()
         self.assertEqual(len(self.scheduler.jobs), 1)  # Downloads run one at a time.
-        key, kind, _ = next(iter(self.scheduler.jobs.values()))
-        self.assertEqual((key.tag, kind), ('c0', 'throughput'))
         self.complete(mbps=20)
-        self.scheduler.samples[key].health = Health.FAILED  # A failed path drops out; c3 moves up.
-        self.assertIn('c3', {k.tag for k in self.scheduler.shortlist()})
-        self.assertIsNone(self.scheduler.next_test(sample_key({'type': 'trojan', 'tag': 'c5'}), shortlisted, self.now))
+        self.scheduler.tick()  # c1 is the lowest-latency due download.
+        key, kind, _ = next(iter(self.scheduler.jobs.values()))
+        self.assertEqual((key.tag, kind), ('c1', 'throughput'))
+        self.assertEqual(self.scheduler.rotated_at, {'p': self.now})
+        self.assertEqual(self.scheduler.rotation(shortlisted, self.now + 14399), {})
+        samples['c1'].last['throughput'] = self.now
+        self.assertEqual([k.tag for k in self.scheduler.rotation(shortlisted, self.now + 14400)], ['c2'])
+
+    def test_failures_wait_for_the_uplink_and_are_dropped_while_it_is_down(self):
+        key = next(iter(self.scheduler.samples))
+        sample = self.scheduler.samples[key]
+        self.scheduler.tick()
+        gate = next(f for f, args in self.submissions if args[2] is self.scheduler.candidates[key])
+        gate.set_result(ProbeResult(Probe.GATE, error='TimeoutError'))
+        self.scheduler.tick()
+        self.assertEqual(sample.failures, 0)  # Held until the uplink is checked.
+        checks = lambda: [f for f, args in self.submissions if args == (self.scheduler.client.uplink_up,)]
+        self.assertEqual(len(checks()), 1)
+        checks()[0].set_result(False)
+        submitted = len(self.submissions)
+        self.scheduler.tick()
+        self.assertIn(('uplink_down', {}), self.logs)
+        self.assertEqual(sample.failures, 0)
+        self.now += 5
+        self.scheduler.tick()
+        self.assertEqual(len(self.submissions), submitted)  # Paused, no recheck yet.
+        self.now += 5
+        self.scheduler.tick()
+        self.assertEqual(len(checks()), 2)
+        checks()[1].set_result(True)
+        self.scheduler.tick()
+        self.assertIn(('uplink_restored', {}), self.logs)
+        self.complete()
+        self.scheduler.tick()
+        self.assertGreater(len(self.submissions), submitted + 1)  # Probing resumed.
+        self.scheduler.accept_or_hold(key, ProbeResult(Probe.GATE, error='TimeoutError'), self.now)
+        self.assertEqual(sample.failures, 1)  # A recent working check is reused.
 
     def test_failure_confirmation_is_scheduled_first_and_survives_cancellation(self):
         key = next(iter(self.scheduler.samples))
@@ -135,9 +172,13 @@ class SchedulingTests(unittest.TestCase):
                   'route': {'rules': [{'outbound': 'proxy_main'}]}}
         before = copy.deepcopy(config['outbounds'])
         compiler.add_probe_routes(config, {'probes_enabled': True}, self.candidates)
-        self.assertEqual(config['outbounds'], before)
+        self.assertEqual(config['outbounds'], before + [UPLINK])  # Only the direct uplink egress is added.
         self.assertEqual(config['route']['rules'][0]['auth_user'][0][:6], 'probe_')
+        self.assertEqual(config['route']['rules'][-3]['outbound'], UPLINK['tag'])
         self.assertEqual(config['route']['rules'][-2]['action'], 'reject')
+        config = {'outbounds': copy.deepcopy(before)}
+        compiler.add_probe_routes(config, {'probes_enabled': True, 'uplink_urls': ()}, self.candidates)
+        self.assertEqual(config['outbounds'], before)
         self.assertEqual(config['inbounds'][0]['listen'], '127.0.0.1')
 
 

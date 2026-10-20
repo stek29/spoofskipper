@@ -7,7 +7,7 @@ from pathlib import Path
 from .clash_api import credentials
 from .state import atomic_write
 from .graph import OutboundGraph
-from .identity import identity
+from .identity import UPLINK, identity
 from .settings import Settings
 
 REVISION_PREFIX = '__spoofskipper_revision_'
@@ -94,9 +94,13 @@ def add_probe_routes(config, settings, candidates):
     settings = Settings.from_mapping(settings)
     if not settings.probes_enabled:
         return
-    if any(i.get('tag') == PROBE_TAG for i in config.get('inbounds', [])):
-        raise ValueError('reserved probe inbound tag')
+    if any(i.get('tag') == PROBE_TAG for i in config.get('inbounds', [])) or \
+            any(o.get('tag') == UPLINK['tag'] for o in config.get('outbounds', [])):
+        raise ValueError('reserved probe tag')
     outbounds = probe_outbounds(config, candidates)
+    if settings.uplink_urls:
+        config.setdefault('outbounds', []).append(dict(UPLINK))
+        outbounds = outbounds + [UPLINK]
     config.setdefault('inbounds', []).append({
         'type': 'mixed', 'tag': PROBE_TAG, 'listen': '127.0.0.1',
         'listen_port': settings.probe_port,

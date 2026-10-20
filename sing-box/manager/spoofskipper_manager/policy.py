@@ -152,7 +152,9 @@ class Policy:
         since = self.pending[selector][1]
         # The switch itself is justified only by a throughput result taken after
         # the challenge started; it also proves the throttling threshold.
-        measured_at = pool.samples[best].throughput_at
+        # A priority return skips the margin, so any fresh threshold proof will do,
+        # including one from a fallback endpoint while the primary is down.
+        measured_at = pool.samples[best].threshold_at if priority_return else pool.samples[best].throughput_at
         if measured_at < since or pool.now-measured_at > FRESH_SAMPLE_SECONDS:
             return Decision(None, 'priority_return_test' if priority_return else 'challenger_test',
                             ((best, Probe.THROUGHPUT),), since)

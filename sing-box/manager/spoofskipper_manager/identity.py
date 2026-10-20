@@ -17,6 +17,10 @@ class Candidate:
     weight: float = 1.0
 
 
+# Direct egress for uplink checks, reached through the probe inbound like a path.
+UPLINK = {'type': 'direct', 'tag': '__spoofskipper_uplink'}
+
+
 def sample_key(outbound):
     return SampleKey(outbound['tag'], hashlib.sha256(json.dumps(outbound, sort_keys=True,
         separators=(',', ':')).encode()).hexdigest())
