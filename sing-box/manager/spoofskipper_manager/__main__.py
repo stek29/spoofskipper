@@ -80,7 +80,7 @@ def main():
             return Manager(args.config_dir, args.state_dir, args.core).run()
         diagnostics(args)
         return 0
-    except (Exception, SystemExit) as exc:
+    except Exception as exc:
         log('manager_failed', error=type(exc).__name__)
         return 1
 

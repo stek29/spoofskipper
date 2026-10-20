@@ -8,119 +8,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import sub2outbounds
+# The parser lives in the manager package so both share a single copy.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sing-box" / "manager"))
+from spoofskipper_manager.parser import (  # noqa: E402
+    apply_outbound_settings,
+    merge_outputs,
+    read_outbound_settings,
+    render_subscription,
+)
 
 
 def load_config(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
-        raise SystemExit("config must be a JSON object")
+        raise ValueError("config must be a JSON object")
     return data
-
-
-def stable_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def deep_merge(base: Any, override: Any) -> Any:
-    if isinstance(base, dict) and isinstance(override, dict):
-        merged = {key: value for key, value in base.items()}
-        for key, value in override.items():
-            if key in merged:
-                merged[key] = deep_merge(merged[key], value)
-            else:
-                merged[key] = value
-        return merged
-    return override
-
-
-def validate_mapping(value: Any, path: str) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise SystemExit(f"{path} must be a JSON object")
-    return value
-
-
-def apply_outbound_settings(
-    output: dict[str, Any],
-    global_settings: dict[str, Any],
-    type_settings: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    configured_outbounds: list[dict[str, Any]] = []
-    for outbound in output.get("outbounds", []):
-        if not isinstance(outbound, dict):
-            raise SystemExit("generated outbound must be a JSON object")
-
-        outbound_type = outbound.get("type")
-        if not isinstance(outbound_type, str) or not outbound_type:
-            raise SystemExit("generated outbound must include a non-empty string type")
-
-        merged = deep_merge(global_settings, validate_mapping(type_settings.get(outbound_type), f"outbound_settings.types.{outbound_type}"))
-        configured_outbounds.append(deep_merge(merged, outbound))
-
-    return {
-        "outbounds": configured_outbounds,
-        "groups": output.get("groups", {}),
-    }
-
-
-def merge_outputs(outputs: list[dict[str, Any]]) -> dict[str, Any]:
-    merged_outbounds: list[dict[str, Any]] = []
-    seen_outbounds: dict[str, str] = {}
-    merged_groups: dict[str, list[str]] = {}
-    seen_group_tags: dict[str, set[str]] = {}
-
-    for output in outputs:
-        for outbound in output.get("outbounds", []):
-            tag = outbound["tag"]
-            serialized = stable_json(outbound)
-            previous = seen_outbounds.get(tag)
-            if previous is None:
-                seen_outbounds[tag] = serialized
-                merged_outbounds.append(outbound)
-            elif previous != serialized:
-                raise SystemExit(f"conflicting outbound definitions for tag: {tag}")
-
-        for group_name, tags in output.get("groups", {}).items():
-            if group_name not in merged_groups:
-                merged_groups[group_name] = []
-                seen_group_tags[group_name] = set()
-            for tag in tags:
-                if tag not in seen_group_tags[group_name]:
-                    seen_group_tags[group_name].add(tag)
-                    merged_groups[group_name].append(tag)
-
-    return {"outbounds": merged_outbounds, "groups": merged_groups}
-
-
-def render_subscription(spec: dict[str, Any]) -> dict[str, Any]:
-    url = spec.get("url")
-    if not isinstance(url, str) or not url:
-        raise SystemExit("each subscription must include a non-empty string url")
-
-    exclude_transport_types = spec.get("exclude_transport_types")
-    if exclude_transport_types is not None and (
-        not isinstance(exclude_transport_types, list)
-        or not all(
-            isinstance(transport_type, str) and transport_type
-            for transport_type in exclude_transport_types
-        )
-    ):
-        raise SystemExit("exclude_transport_types must be an array of non-empty strings")
-
-    return sub2outbounds.generate_output(
-        url,
-        prefix=str(spec.get("prefix", "")),
-        name_regex=spec.get("name_regex"),
-        tag_template=spec.get("tag_template"),
-        group_template=spec.get("group_template"),
-        group_fallback=str(spec.get("group_fallback", "other")),
-        ignore_regex=spec.get("ignore_regex"),
-        group_exclude_regex=spec.get("group_exclude_regex"),
-        exclude_transport_types=exclude_transport_types,
-    )
 
 
 def main() -> int:
@@ -128,27 +31,25 @@ def main() -> int:
     parser.add_argument("config")
     args = parser.parse_args()
 
-    config = load_config(Path(args.config))
-    outbound_settings = validate_mapping(config.get("outbound_settings"), "outbound_settings")
-    global_outbound_settings = validate_mapping(outbound_settings.get("global"), "outbound_settings.global")
-    raw_type_settings = validate_mapping(outbound_settings.get("types"), "outbound_settings.types")
-    type_outbound_settings = {
-        outbound_type: validate_mapping(settings, f"outbound_settings.types.{outbound_type}")
-        for outbound_type, settings in raw_type_settings.items()
-    }
-    subscriptions = config.get("subscriptions")
-    if not isinstance(subscriptions, list) or not subscriptions:
-        raise SystemExit("config must include a non-empty subscriptions array")
+    try:
+        config = load_config(Path(args.config))
+        global_outbound_settings, type_outbound_settings = read_outbound_settings(config)
+        subscriptions = config.get("subscriptions")
+        if not isinstance(subscriptions, list) or not subscriptions:
+            raise ValueError("config must include a non-empty subscriptions array")
 
-    outputs = [
-        apply_outbound_settings(
-            render_subscription(spec),
-            global_outbound_settings,
-            type_outbound_settings,
-        )
-        for spec in subscriptions
-    ]
-    json.dump(merge_outputs(outputs), sys.stdout, ensure_ascii=False, indent=2)
+        outputs = [
+            apply_outbound_settings(
+                render_subscription(spec),
+                global_outbound_settings,
+                type_outbound_settings,
+            )
+            for spec in subscriptions
+        ]
+        merged = merge_outputs(outputs)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    json.dump(merged, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0
 

@@ -1,5 +1,4 @@
 import base64
-import importlib.util
 import json
 import sys
 import tempfile
@@ -9,14 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'manager'))
-from spoofskipper_manager import subscriptions as subs
-
-
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from spoofskipper_manager import parser, subscriptions as subs
 
 
 class SubscriptionTests(unittest.TestCase):
@@ -44,7 +36,7 @@ class SubscriptionTests(unittest.TestCase):
                 raise ValueError('private-url-do-not-log')
             return 'trojan://secret@localhost:443#one'
         first = self.providers()
-        with patch.object(subs, 'fetch_url', fetch):
+        with patch.object(parser, 'fetch_url', fetch):
             pending = first.refresh()
         self.assertEqual(list(pending), ['a'])
         self.assertFalse(first.path('a').exists())
@@ -52,7 +44,7 @@ class SubscriptionTests(unittest.TestCase):
         old_age = pending['a']['fetched_at']
         second = self.providers()
         self.assertEqual(first.merged(pending), second.merged(second.snapshots))
-        with patch.object(subs, 'fetch_url', return_value='trojan://secret@localhost:443#one'):
+        with patch.object(parser, 'fetch_url', return_value='trojan://secret@localhost:443#one'):
             updated = second.refresh()
         self.assertEqual(set(updated), {'a', 'b'})
         self.assertGreater(updated['a']['fetched_at'], old_age)
@@ -65,33 +57,61 @@ class SubscriptionTests(unittest.TestCase):
 
     def test_empty_and_malformed_keep_last_good(self):
         p = self.providers()
-        with patch.object(subs, 'fetch_url', return_value='trojan://secret@localhost:443#one'):
+        with patch.object(parser, 'fetch_url', return_value='trojan://secret@localhost:443#one'):
             p.commit(p.refresh())
         for body in ('', 'garbage', 'vless://bad@:nonnumeric'):
-            with patch.object(subs, 'fetch_url', return_value=body):
+            with patch.object(parser, 'fetch_url', return_value=body):
                 self.assertEqual(p.refresh(), p.snapshots)
 
-    def test_parser_byte_parity_all_protocols(self):
-        legacy_root = ROOT.parent / 'sing-subs'
-        parser = load('sub2outbounds', legacy_root / 'sub2outbounds.py')
-        sys.modules['sub2outbounds'] = parser
-        merge = load('legacy_merge', legacy_root / 'merge-subs.py')
-        vmess = base64.b64encode(json.dumps({'add': 'localhost', 'port': '443', 'id': 'uuid', 'ps': 'vm'}).encode()).decode()
-        body = '\n'.join(['vless://uuid@localhost:443?security=reality&pbk=public&sid=01#vl',
-                         'trojan://secret@localhost:443?security=tls&type=ws&path=%2F#tr',
-                         'ss://YWVzLTEyOC1nY206cGFzcw==@localhost:443#ss', 'vmess://' + vmess,
-                         'hy2://pass@localhost:443?sni=example.test#hy',
-                         'hysteria2://pass@localhost:443?obfs=salamander&obfs-password=x#hyb'])
+    def test_parser_output_matches_golden_all_protocols(self):
+        golden = json.loads((ROOT / 'manager/tests/fixtures/parser-golden.json').read_text())
+        body = golden['body']
         for encoded in (body, base64.b64encode(body.encode()).decode()):
-            with patch.object(parser, 'fetch_url', return_value=encoded), patch.object(subs, 'fetch_url', return_value=encoded):
-                spec = self.specs['subscriptions'][0]
-                expected = merge.apply_outbound_settings(merge.render_subscription(spec), {'connect_timeout': '5s'}, {})
-                actual = subs.apply_outbound_settings(subs.render_subscription(spec), {'connect_timeout': '5s'}, {})
-                self.assertEqual(json.dumps(expected, ensure_ascii=False, indent=2), json.dumps(actual, ensure_ascii=False, indent=2))
+            with patch.object(parser, 'fetch_url', return_value=encoded):
+                actual = parser.apply_outbound_settings(parser.render_subscription(golden['spec']),
+                                                        {'connect_timeout': '5s'}, {})
+            self.assertEqual(actual, golden['output'])
+
+    def test_sing_subs_cli_uses_shared_parser(self):
+        import subprocess
+        golden = json.loads((ROOT / 'manager/tests/fixtures/parser-golden.json').read_text())
+        specs = self.root / 'specs.json'
+        # Serve the body from a file URL so the CLI runs without network access.
+        source = self.root / 'body.txt'
+        source.write_text(golden['body'])
+        golden['spec']['url'] = source.as_uri()
+        specs.write_text(json.dumps({'subscriptions': [golden['spec']],
+                                     'outbound_settings': {'global': {'connect_timeout': '5s'}}}))
+        result = subprocess.run([sys.executable, str(ROOT.parent / 'sing-subs/merge-subs.py'), str(specs)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), golden['output'])
+
+    def test_fetch_is_bounded(self):
+        class Response:
+            def __init__(self, chunks):
+                self.chunks = iter(chunks)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read1(self, size):
+                return next(self.chunks, b'')
+        big = [b'x' * 65536] * (parser.MAX_BODY_BYTES // 65536 + 1)
+        with patch.object(parser.urllib.request, 'urlopen', return_value=Response(big)):
+            with self.assertRaises(ValueError):
+                parser.fetch_url('https://invalid.test/')
+        clock = iter([0, parser.FETCH_DEADLINE_SECONDS + 1])
+        with patch.object(parser.urllib.request, 'urlopen', return_value=Response([b'a', b'b'])), \
+             patch.object(parser.time, 'monotonic', lambda: next(clock)):
+            with self.assertRaises(TimeoutError):
+                parser.fetch_url('https://invalid.test/')
+        with patch.object(parser.urllib.request, 'urlopen', return_value=Response([b' ok\n'])):
+            self.assertEqual(parser.fetch_url('https://invalid.test/'), 'ok')
 
     def test_conflict_and_unique_prefix(self):
-        with self.assertRaises(SystemExit):
-            subs.merge_outputs([{'outbounds': [{'tag': 'a', 'type': 'direct'}]},
+        with self.assertRaises(ValueError):
+            parser.merge_outputs([{'outbounds': [{'tag': 'a', 'type': 'direct'}]},
                                 {'outbounds': [{'tag': 'a', 'type': 'block'}]}])
         self.specs['subscriptions'][1]['prefix'] = 'a'
         (self.config / 'local-subs-config.json').write_text(json.dumps(self.specs))

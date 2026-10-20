@@ -296,7 +296,7 @@ class Manager:
                     pending = None
             except (Stopping, RecoveryFailed):
                 raise
-            except (Exception, SystemExit) as exc:
+            except Exception as exc:
                 log('cached_render_failed', error=type(exc).__name__)
                 if self.current is not None:
                     pending = None
@@ -335,7 +335,7 @@ class Manager:
                             next_refresh = time.monotonic() + (self.settings['refresh_seconds'] if fetched else 0)
                     except (Stopping, RecoveryFailed):
                         raise
-                    except (Exception, SystemExit) as exc:
+                    except Exception as exc:
                         log('refresh_failed', error=type(exc).__name__)
                         if self.current is not None:
                             pending = None

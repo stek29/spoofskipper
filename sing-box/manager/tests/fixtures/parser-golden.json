@@ -1,0 +1,101 @@
+{
+  "body": "vless://uuid@localhost:443?security=reality&pbk=public&sid=01#vl\ntrojan://secret@localhost:443?security=tls&type=ws&path=%2F#tr\nss://YWVzLTEyOC1nY206cGFzcw==@localhost:443#ss\nvmess://eyJhZGQiOiAibG9jYWxob3N0IiwgInBvcnQiOiAiNDQzIiwgImlkIjogInV1aWQiLCAicHMiOiAidm0ifQ==\nhy2://pass@localhost:443?sni=example.test#hy\nhysteria2://pass@localhost:443?obfs=salamander&obfs-password=x#hyb",
+  "spec": {
+    "prefix": "a",
+    "url": "https://invalid.test/a",
+    "tag_template": "{prefix}_{name}",
+    "group_template": "{prefix}"
+  },
+  "output": {
+    "outbounds": [
+      {
+        "connect_timeout": "5s",
+        "type": "vless",
+        "tag": "a_vl",
+        "server": "localhost",
+        "server_port": 443,
+        "uuid": "uuid",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "public_key": "public",
+            "short_id": "01"
+          }
+        }
+      },
+      {
+        "connect_timeout": "5s",
+        "type": "trojan",
+        "tag": "a_tr",
+        "server": "localhost",
+        "server_port": 443,
+        "password": "secret",
+        "tls": {
+          "enabled": true
+        },
+        "transport": {
+          "type": "ws",
+          "path": "/",
+          "headers": {}
+        }
+      },
+      {
+        "connect_timeout": "5s",
+        "type": "shadowsocks",
+        "tag": "a_ss",
+        "server": "localhost",
+        "server_port": 443,
+        "method": "aes-128-gcm",
+        "password": "pass",
+        "network": "tcp"
+      },
+      {
+        "connect_timeout": "5s",
+        "type": "vmess",
+        "tag": "a_vm",
+        "server": "localhost",
+        "server_port": 443,
+        "uuid": "uuid",
+        "security": "auto"
+      },
+      {
+        "connect_timeout": "5s",
+        "type": "hysteria2",
+        "tag": "a_hy",
+        "server": "localhost",
+        "server_port": 443,
+        "password": "pass",
+        "tls": {
+          "enabled": true,
+          "server_name": "example.test"
+        }
+      },
+      {
+        "connect_timeout": "5s",
+        "type": "hysteria2",
+        "tag": "a_hyb",
+        "server": "localhost",
+        "server_port": 443,
+        "password": "pass",
+        "tls": {
+          "enabled": true
+        },
+        "obfs": {
+          "type": "salamander",
+          "password": "x"
+        }
+      }
+    ],
+    "groups": {
+      "a": [
+        "a_vl",
+        "a_tr",
+        "a_ss",
+        "a_vm",
+        "a_hy",
+        "a_hyb"
+      ]
+    }
+  }
+}

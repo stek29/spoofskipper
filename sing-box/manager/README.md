@@ -54,6 +54,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_backup_url` | `https://proof.ovh.net/files/1Mb.dat` | Verified HTTPS backup HEAD/Range endpoint |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
+Subscription bodies are limited to 16 MiB and 60 seconds per fetch.
 Subscription specs retain the existing format and require unique, nonempty
 provider prefixes. Local proxy leaves are discovered from the rendered graph;
 direct/block/DNS entries are excluded. Protocols have no special preference.
@@ -119,7 +120,8 @@ apply before rendering, including when an unrelated render fails.
 
 Failed activation restores and verifies the previous core once. Interrupted
 activation restores previous JSON before startup. Failed recovery leaves the
-marker and exits nonzero. First-install failures retry in-process and discard
+marker and exits nonzero. A saved config that fails to start is stopped and
+replaced by a fresh render from `/config`. First-install failures retry in-process and discard
 unverified JSON. Unexpected child exit triggers Docker restart.
 
 For full image/cron rollback:
@@ -127,6 +129,7 @@ For full image/cron rollback:
 1. Stop the manager container.
 2. Restore `config.jsonnet.legacy` to `config.jsonnet`.
 3. Run `sing-subs/merge-subs.py` once with the private specs to update `local-subs.json`.
+   It imports the shared parser from `sing-box/manager`, so run it from a full checkout.
 4. Restore the pre-cutover `docker-compose.yml` and `.env`, for example from the
    saved pre-cutover commit. Verify `sing-tun.command` is
    `['run', '-c', '/tmp/sing.json']` and `.env` selects the old image tag.
