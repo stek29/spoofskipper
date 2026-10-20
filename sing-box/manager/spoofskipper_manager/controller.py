@@ -2,7 +2,7 @@
 from . import clash_api
 from .clash_api import resolve
 from .compiler import selectors, selector_members
-from .policy import Policy, score
+from .policy import Policy, score, eligible_pool
 from .settings import ACTIVE_SCORE_MAX_AGE
 
 
@@ -11,6 +11,7 @@ class SelectorController:
         self.measurements, self.log = measurements, log
         self.policy = Policy()
         self.last_decisions = {}
+        self.decisions = {}
 
     def revoke(self, selectors):
         for tag in selectors:
@@ -18,6 +19,7 @@ class SelectorController:
             self.policy.switched_at.pop(tag, None)
             self.policy.pending.pop(tag, None)
             self.last_decisions.pop(tag, None)
+            self.decisions.pop(tag, None)
 
     def inspect(self):
         measurements = self.measurements
@@ -37,6 +39,7 @@ class SelectorController:
             members = selector_members(measurements.config, selector)
             decision = self.policy.decide(selector, measurements.active[selector], measurements.candidates,
                 measurements.samples, now, measurements.settings, members)
+            self.decisions[selector] = decision
             pending = self.policy.pending.get(selector)
             for key, kind in decision.tests:
                 last = measurements.samples[key].last.get(kind, float('-inf'))
@@ -73,37 +76,35 @@ class SelectorController:
             except Exception as exc:
                 self.log('selector_write_failed', selector=selector, error=type(exc).__name__)
 
-    def summary(self, now):
+    def summary_choice(self, selector, now):
         measurements = self.measurements
-        choices = {}
-        for selector in selectors(measurements.config):
-            members = selector_members(measurements.config, selector)
-            tiers = measurements.settings.get('selector_priorities', {}).get(selector)
-            allowed = [(k, c) for k, c in measurements.candidates.items() if k[0] in members]
-            if tiers is not None:
-                for tier in tiers:
-                    group = [(k, c) for k, c in allowed if c['provider'] in tier]
-                    if any(measurements.samples[k].healthy is not False for k, _ in group):
-                        allowed = group
-                        break
-                else:
-                    allowed = []
-            ranked = []
-            for key, c in allowed:
-                sample = measurements.samples[key]
-                if sample.healthy and not sample.body_failed:
-                    value = score(sample, c['weight'], now, ACTIVE_SCORE_MAX_AGE if key[0] in measurements.active.values() else measurements.settings['throughput_sweep_seconds'])
-                    ranked.append((value is not None, value or 0, -(sample.latency_or_inf), key[0]))
-            best = max(ranked) if ranked else None
-            choices[selector] = {'active': measurements.active.get(selector), 'proposed': best[3] if best else None,
-                                 'proposed_score': best[1] if best and best[0] else None,
-                                 'reason': 'observed_ranking' if best else 'health_or_performance_unknown'}
-            for key, c in measurements.candidates.items():
-                if key[0] == measurements.active.get(selector):
-                    sample = measurements.samples[key]
-                    choices[selector].update(score=score(sample, c['weight'], now, ACTIVE_SCORE_MAX_AGE),
-                        sample_age=now-sample.throughput_at if sample.successes else None)
-        for selector, signature in self.last_decisions.items():
-            if selector in measurements.settings.get('managed_selectors', []):
-                choices[selector]['decision_reason'] = signature[0]
-        self.log('observe_summary', selectors=choices, application_bytes=measurements.accounting.summary())
+        current = measurements.active.get(selector)
+        members = selector_members(measurements.config, selector)
+        pool = eligible_pool(selector, current, measurements.candidates, measurements.samples,
+                             now, measurements.settings, members)
+        if selector in measurements.settings.managed_selectors:
+            decision = self.decisions.get(selector)
+            proposed = decision.target if decision else None
+            if decision and proposed is None:
+                proposed = pool.active  # The policy keeps the current route.
+            reason = decision.reason if decision else 'awaiting_policy'
+        else:
+            proposed = max(pool.available, key=pool.rank) if pool.available and not pool.unresolved else None
+            reason = ('priority_health_unknown' if pool.unresolved else
+                      'observed_ranking' if proposed else 'health_or_performance_unknown')
+        choice = {'active': current, 'proposed': proposed[0] if proposed else None,
+                  'proposed_score': pool.value(proposed, ACTIVE_SCORE_MAX_AGE if proposed == pool.active
+                                              else None) if proposed else None, 'reason': reason}
+        if selector in measurements.settings.managed_selectors:
+            choice['decision_reason'] = reason
+        if pool.active:
+            sample = measurements.samples[pool.active]
+            choice.update(score=pool.value(pool.active, ACTIVE_SCORE_MAX_AGE),
+                          sample_age=now-sample.throughput_at if sample.successes else None)
+        return choice
+
+    def summary(self, now):
+        choices = {selector: self.summary_choice(selector, now)
+                   for selector in selectors(self.measurements.config)}
+        self.log('observe_summary', selectors=choices,
+                 application_bytes=self.measurements.accounting.summary())

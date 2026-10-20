@@ -169,6 +169,7 @@ class SchedulingTests(unittest.TestCase):
         self.scheduler.configure(config, self.candidates, {'probes_enabled': True})
         for key, sample in self.scheduler.samples.items():
             sample.health, sample.latency = Health.HEALTHY, 20
+            sample.healthy_at = self.now
             sample.successes = [(self.now, 50 if key[0] == 'chained' else 1, 20)]
         self.scheduler.controller.summary(self.now)
         choices = self.logs[-1][1]['selectors']
