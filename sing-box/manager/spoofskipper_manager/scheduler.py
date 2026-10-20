@@ -36,8 +36,9 @@ class Scheduler:
     def configure(self, config, candidates, settings):
         settings = Settings.from_mapping(settings)
         enabled = settings.probes_enabled
+        live_client = self.client is not None and not self.client.cancelled.is_set()
         if (config == self.config and settings == self.settings and list(candidates) == self.configured
-                and (self.client is not None) == enabled):
+                and live_client == enabled):
             return  # Unchanged reloads keep in-flight probes and their results.
         self.configured = list(candidates)
         self.epoch += 1

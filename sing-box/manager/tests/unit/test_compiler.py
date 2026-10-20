@@ -182,6 +182,31 @@ class CompilerTests(unittest.TestCase):
             self.assertFalse(m.marker.exists())
             self.assertEqual(json.loads(m.live.read_text()), old)
 
+    def test_rollback_with_unchanged_settings_gets_a_live_probe_client(self):
+        from unittest.mock import Mock
+        from spoofskipper_manager.service import ActivationRolledBack
+        with tempfile.TemporaryDirectory() as temp:
+            m = Manager(temp, Path(temp) / 'state')
+            old = config()
+            old['outbounds'] = [{'type': 'trojan', 'tag': 'a'}, {'type': 'selector', 'tag': 'sel', 'outbounds': ['a']},
+                                {'type': 'direct', 'tag': compiler.REVISION_PREFIX + 'old'}]
+            new = copy.deepcopy(old)
+            new['outbounds'][-1]['tag'] = compiler.REVISION_PREFIX + 'new'
+            m.current, m.child = old, Mock()
+            write_json(m.live, old)
+            m.settings = m.settings.with_changes(probes_enabled=True, managed_selectors=('sel',))
+            m.scheduler.configure(old, [{'provider': 'p', 'weight': 1, 'outbound': old['outbounds'][0]}], m.settings)
+            try:
+                with patch.object(compiler, 'check'), patch.object(m, 'alive', return_value=True), \
+                     patch.object(m, 'verify', side_effect=[False, True]), patch.object(m, 'start'), \
+                     patch.object(m, 'stop_child'), patch.object(clash_api, 'select'), \
+                     patch.object(clash_api, 'proxies', return_value={'sel': {'now': 'a'}}):
+                    with self.assertRaises(ActivationRolledBack):
+                        m.activate_and_configure(new, Mock(), {})
+                self.assertFalse(m.scheduler.client.cancelled.is_set())
+            finally:
+                m.scheduler.close()
+
     def test_rollback_recreates_probes_once_with_only_retained_ownership(self):
         from unittest.mock import Mock
         from spoofskipper_manager.service import ActivationRolledBack
