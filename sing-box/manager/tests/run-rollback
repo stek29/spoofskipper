@@ -59,11 +59,11 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
     output = {'outbounds': [{'type': 'trojan', 'tag': 'example_one', 'server': '127.0.0.1',
                             'server_port': 1, 'password': 'synthetic'}], 'groups': {'example': ['example_one']}}
     provider.commit({'example': {'provider': 'example', 'fetched_at': time.time(), 'output': output}})
-    name = 'spoofskipper-stage1-rollback-' + str(os.getpid())
+    name = 'spoofskipper-rollback-' + str(os.getpid())
     volumes = ['-v', f'{config}:/config:ro', '-v', f'{data}:/data']
     try:
         docker('run', '-d', '--name', name, '--network', 'none', '--user', str(os.getuid()),
-               '--read-only', '--tmpfs', '/tmp', *volumes, 'spoofskipper-manager:stage3')
+               '--read-only', '--tmpfs', '/tmp', *volumes, 'spoofskipper-manager:test')
         wait(lambda: b'activation_succeeded' in docker('logs', name))
         docker('stop', '-t', '3', name)
         assert docker('inspect', '-f', '{{.State.ExitCode}}', name).strip() == b'0'
@@ -74,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
         # a bind-mounted file's old length after a host-side replacement).
         docker('run', '--rm', '--network', 'none', '--user', str(os.getuid()),
                '-v', f'{config}:/config', '--entrypoint', 'python3', '-e', 'PYTHONPATH=/opt/manager',
-               'spoofskipper-manager:stage3', '-c',
+               'spoofskipper-manager:test', '-c',
                'from pathlib import Path; from spoofskipper_manager.state import atomic_write; '
                'atomic_write(Path("/config/config.jsonnet"), Path("/config/config.jsonnet.legacy").read_bytes())')
         local_specs = {'subscriptions': [{**specs['subscriptions'][0], 'url': (config / 'provider.txt').as_uri()}]}
@@ -85,13 +85,13 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
         (config / 'local-subs.json').write_bytes(result.stdout)
         before = {p.relative_to(data): hashlib.sha256(p.read_bytes()).digest() for p in data.rglob('*') if p.is_file()}
         observed = docker('run', '--rm', '--network', 'none', '--entrypoint', '/bin/cat', *volumes,
-                      'spoofskipper-legacy:stage1', '/config/config.jsonnet')
+                      'spoofskipper-legacy:test', '/config/config.jsonnet')
         assert observed == original.encode(), 'restored template differs'
         # Only isolate mounts/network/privileges and substitute the preloaded
         # legacy image. The command comes from the restored release Compose file.
         rehearsal = root / 'rollback-compose.json'
         rehearsal.write_text(json.dumps({'services': {'legacy': {
-            'image': 'spoofskipper-legacy:stage1', 'command': legacy_service['command'],
+            'image': 'spoofskipper-legacy:test', 'command': legacy_service['command'],
             'container_name': name, 'network_mode': 'none', 'user': str(os.getuid()),
             'read_only': True, 'tmpfs': ['/tmp'],
             'environment': {'CONFIG_TMPL': '/config/sing.jsonnet'},
@@ -102,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
         # baseline container's network namespace using the preloaded new image.
         wait(lambda: docker('exec', name, '/bin/sh', '-c', '[ -s /tmp/sing.json ]') == b'')
         docker('run', '--rm', '--network', 'container:' + name, '--entrypoint', 'python3',
-               'spoofskipper-manager:stage3', '-c',
+               'spoofskipper-manager:test', '-c',
                'import json,time,urllib.request\n'
                'for _ in range(50):\n'
                ' try:\n'

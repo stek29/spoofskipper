@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-# Build/preload spoofskipper-manager:stage3 before invoking. Tests have no egress.
+# Build/preload spoofskipper-manager:test before invoking. Tests have no egress.
 exec docker compose -p spoofskipper-manager-tests -f compose.yml run --rm --no-deps tests
