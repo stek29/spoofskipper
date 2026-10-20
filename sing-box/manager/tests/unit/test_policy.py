@@ -338,6 +338,27 @@ class PolicySchedulingTests(unittest.TestCase):
         self.assertEqual(len(self.submitted), count)
         self.write.assert_not_called()
 
+    def test_managed_summary_reports_policy_hold_instead_of_challenger_ranking(self):
+        self.scheduler.controller.inspect()
+        self.scheduler.controller.apply_policy(self.now)
+        choice = self.scheduler.controller.summary_choice('proxy_main', self.now)
+        self.assertEqual(choice['reason'], 'hold')
+        self.assertEqual(choice['proposed'], 'a')
+
+    def test_observational_summary_blocks_lower_tier_until_fresh_health_is_known(self):
+        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=())
+        for key, sample in self.scheduler.samples.items():
+            if key[0] != 'chained':
+                sample.healthy_at = self.now-10000
+        choice = self.scheduler.controller.summary_choice('proxy_deepmind', self.now)
+        self.assertEqual(choice['reason'], 'priority_health_unknown')
+        self.assertIsNone(choice['proposed'])
+        for key, sample in self.scheduler.samples.items():
+            if key[0] != 'chained':
+                sample.health = Health.FAILED_GATE
+        choice = self.scheduler.controller.summary_choice('proxy_deepmind', self.now)
+        self.assertEqual(choice['proposed'], 'chained')
+
     def test_upstream_write_drains_and_invalidates_chained_samples(self):
         from concurrent.futures import Future
         self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['chained_upstream'])

@@ -107,4 +107,4 @@ class SelectorController:
         choices = {selector: self.summary_choice(selector, now)
                    for selector in selectors(self.measurements.config)}
         self.log('observe_summary', selectors=choices,
-                 application_bytes=self.measurements.accounting.summary())
+                 application_bytes=self.measurements.accounting.summary(reset=True))

@@ -125,13 +125,17 @@ class SchedulingTests(unittest.TestCase):
             _, valid = self.scheduler.perform(Client(), config, {'provider': 'tunnel', 'outbound': config['endpoints'][0]}, 'gate')
         self.assertFalse(valid)
 
-    def test_accounting_hour_today(self):
+    def test_accounting_period_reset_preserves_day_total(self):
         account = Accounting(clock=lambda: self.now)
         account.add(sent=1, received=2, skipped=1)
         self.now += 3600
         account.add(received=3)
-        self.assertEqual(account.summary()['hour'], {'received': 3})
+        self.assertEqual(account.summary(reset=True)['hour'], {'sent': 1, 'received': 5, 'skipped': 1})
+        self.assertEqual(account.summary()['hour'], {})
         self.assertEqual(account.summary()['today']['received'], 5)
+        self.now += 86400
+        account.add(received=7)
+        self.assertEqual(account.summary()['today'], {'received': 7})
 
     def test_routes_do_not_change_selectors_and_are_first(self):
         config = {'outbounds': self.config['outbounds'] + [{'type': 'selector', 'tag': 'proxy_main', 'outbounds': ['c0']}],

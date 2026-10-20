@@ -21,20 +21,29 @@ DEFAULTS = NUMERIC_DEFAULTS
 class Accounting:
     """Plaintext HTTP bytes, including partial I/O and response read-ahead."""
     def __init__(self, clock=time.time):
-        self.clock, self.lock, self.buckets = clock, threading.Lock(), {}
+        self.clock, self.lock = clock, threading.Lock()
+        self.period, self.today = Counter(), Counter()
+        self.day = int(clock() // 86400)
+
+    def roll_day(self):
+        day = int(self.clock() // 86400)
+        if day != self.day:
+            self.day = day
+            self.today.clear()
 
     def add(self, **counts):
         with self.lock:
-            self.buckets.setdefault(int(self.clock() // 60), Counter()).update(counts)
+            self.roll_day()
+            self.period.update(counts)
+            self.today.update(counts)
 
-    def summary(self):
-        minute = int(self.clock() // 60)
-        today = minute // 1440 * 1440
+    def summary(self, reset=False):
         with self.lock:
-            self.buckets = {m: b for m, b in self.buckets.items() if m >= min(today, minute - 59)}
-            def total(start):
-                return dict(sum((b for m, b in self.buckets.items() if start <= m <= minute), Counter()))
-            return {'hour': total(minute - 59), 'today': total(today)}
+            self.roll_day()
+            totals = {'hour': dict(self.period), 'today': dict(self.today)}
+            if reset:
+                self.period.clear()
+            return totals
 
 
 class _ResponseSocket:
