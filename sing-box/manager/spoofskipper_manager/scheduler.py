@@ -117,6 +117,7 @@ class Scheduler:
         self.controller = SelectorController(self, log)
         self.requested = {}
         self.configured = None
+        self.graph, self.members = None, {}
 
     def configure(self, config, candidates, settings):
         settings = Settings.from_mapping(settings)
@@ -127,6 +128,7 @@ class Scheduler:
         self.configured = list(candidates)
         self.epoch += 1
         self.config, self.settings = config, settings
+        self.graph, self.members = OutboundGraph(config), {}
         subscribed = {c['outbound']['tag']: c for c in candidates}
         entries = []
         if enabled:
@@ -161,7 +163,7 @@ class Scheduler:
         paths = {}
         for key in self.candidates:
             try:
-                path = path_identity(self.config, proxies, key[0])
+                path = self.graph.path_identity(key[0], proxies)
             except ValueError:
                 path = None  # Unknown selection cannot retain trusted evidence.
             if key in self.paths and (path is None or path != self.paths[key]):
@@ -170,6 +172,11 @@ class Scheduler:
             paths[key] = path
         self.paths = paths
         self.path_versions = {k: self.path_versions.get(k, 0) for k in paths}
+
+    def selector_members(self, selector):
+        if selector not in self.members:
+            self.members[selector] = self.graph.leaves(selector)
+        return self.members[selector]
 
     def invalidate(self):
         # Quiesce before core reloads or dependent selector writes. Cancellation

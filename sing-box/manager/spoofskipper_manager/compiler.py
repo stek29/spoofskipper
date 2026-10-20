@@ -84,10 +84,6 @@ def selectors(config):
     return [o['tag'] for o in config.get('outbounds', []) if o.get('type') == 'selector']
 
 
-def selector_members(config, selector):
-    return OutboundGraph(config).leaves(selector)
-
-
 def probe_outbounds(config, candidates=()):
     # Every rendered proxy leaf is eligible, whether subscribed or local.
     return [o for o in config.get('outbounds', []) + config.get('endpoints', [])

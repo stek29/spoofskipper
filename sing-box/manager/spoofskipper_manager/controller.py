@@ -1,7 +1,7 @@
 """Selector observation, policy decisions and verified API writes."""
 from . import clash_api
 from .clash_api import resolve
-from .compiler import selectors, selector_members
+from .compiler import selectors
 from .policy import Policy, score, eligible_pool
 from .settings import ACTIVE_SCORE_MAX_AGE
 
@@ -36,7 +36,7 @@ class SelectorController:
         for selector in selectors(measurements.config):
             if selector not in managed or selector not in measurements.active:
                 continue
-            members = selector_members(measurements.config, selector)
+            members = measurements.selector_members(selector)
             decision = self.policy.decide(selector, measurements.active[selector], measurements.candidates,
                 measurements.samples, now, measurements.settings, members)
             self.decisions[selector] = decision
@@ -79,7 +79,7 @@ class SelectorController:
     def summary_choice(self, selector, now):
         measurements = self.measurements
         current = measurements.active.get(selector)
-        members = selector_members(measurements.config, selector)
+        members = measurements.selector_members(selector)
         pool = eligible_pool(selector, current, measurements.candidates, measurements.samples,
                              now, measurements.settings, members)
         if selector in measurements.settings.managed_selectors:

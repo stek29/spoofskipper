@@ -10,6 +10,7 @@ class OutboundGraph:
         self.entries = {entry['tag']: entry for entry in entries}
         if len(self.entries) != len(entries):
             raise ValueError('duplicate outbound/endpoint tags')
+        self.keys = {}
 
     def dependencies(self, tag, choices=None, groups_only=False):
         entry = self.entries[tag]
@@ -58,4 +59,8 @@ class OutboundGraph:
         return self.fold(tag, flatten, groups_only=True)
 
     def path_identity(self, tag, choices):
-        return self.fold(tag, lambda entry, children: (sample_key(entry), tuple(children)), choices=choices)
+        def node(entry, children):
+            if entry['tag'] not in self.keys:
+                self.keys[entry['tag']] = sample_key(entry)
+            return self.keys[entry['tag']], tuple(children)
+        return self.fold(tag, node, choices=choices)
