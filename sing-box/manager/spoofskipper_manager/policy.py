@@ -8,8 +8,8 @@ MARGIN = 1.15
 
 
 def score(sample, weight, now, max_age):
-    recent = [(rate, latency) for at, rate, latency in sample.successes if 0 <= now-at <= max_age]
-    if not recent or sample.healthy is not True or sample.body_failed:
+    recent = sample.scored(now, max_age)
+    if not recent:
         return None
     rate = statistics.median(rate for rate, _ in recent[-3:])
     latency = statistics.median(latency for _, latency in recent[-3:])
@@ -46,12 +46,12 @@ class Policy:
         health_age = settings['gate_standby_seconds'] * 2
         def healthy(k):
             s = samples[k]
-            return s.healthy is True and now-s.healthy_at <= health_age
+            return s.is_healthy(now, health_age)
         def value(k, maximum=age):
             return score(samples[k], allowed[k]['weight'], now, maximum)
         def rank(k, maximum=age):
             v = value(k, 7200 if k == active and math.isfinite(maximum) else maximum)
-            return (v is not None, v or 0, -(samples[k].latency or float('inf')), k)
+            return (v is not None, v or 0, -(samples[k].latency_or_inf), k)
         def unknown(k):
             return samples[k].healthy is not False and not healthy(k)
         def gate_tests(keys):

@@ -11,7 +11,7 @@ from test_lifecycle import free_port, wait_for
 import test_lifecycle
 from spoofskipper_manager import clash_api, compiler
 SELECTORS = ('traffic', 'restricted', 'transport')
-from spoofskipper_manager.scheduler import Sample
+from spoofskipper_manager.scheduler import Health, Sample
 from spoofskipper_manager.service import Manager
 from spoofskipper_manager.state import write_json
 
@@ -158,7 +158,7 @@ class SelectorIntegrationTests(unittest.TestCase):
                     scheduler.inspect()
                     now = scheduler.clock()
                     for key in scheduler.samples:
-                        scheduler.samples[key] = Sample(healthy=key[0] != 'b', healthy_at=now,
+                        scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] != 'b' else Health.FAILED_GATE, healthy_at=now,
                             latency=20, successes=[(now, 20, 20)])
                     with patch.object(scheduler.pool, 'submit') as submit:
                         scheduler.apply_policy(now)

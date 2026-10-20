@@ -254,6 +254,7 @@ class ProbeIntegrationTests(unittest.TestCase):
         providers.refresh.return_value = {'p': {}}
         providers.commit.side_effect = OSError('snapshot write failed')
         tested = False
+        failures = []
         real_wait = manager.wait
         def tick():
             nonlocal tested
@@ -267,6 +268,13 @@ class ProbeIntegrationTests(unittest.TestCase):
             manager.scheduler.accept(key, 'gate', result, time.monotonic())
             self.assertTrue(manager.scheduler.samples[key].healthy)
             tested = True
+        def checked_tick():
+            nonlocal tested
+            try:
+                tick()
+            except AssertionError as exc:
+                failures.append(exc)
+                tested = True
         def wait(seconds):
             if tested:
                 raise service.Stopping()
@@ -274,8 +282,10 @@ class ProbeIntegrationTests(unittest.TestCase):
         with patch.object(service.signal, 'signal'), patch.object(service, 'Providers', return_value=providers), \
              patch.object(service, 'load_settings', return_value=settings), \
              patch.object(manager, 'prepare', side_effect=[old, new]), \
-             patch.object(manager.scheduler, 'tick', side_effect=tick), patch.object(manager, 'wait', side_effect=wait):
+             patch.object(manager.scheduler, 'tick', side_effect=checked_tick), patch.object(manager, 'wait', side_effect=wait):
             self.assertEqual(manager.run(), 0)
+        if failures:
+            raise failures[0]
         self.assertTrue(tested)
 
     def test_freeze_truncation_slow_completion_and_throughput_early_stop(self):

@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api, compiler
 from spoofskipper_manager.policy import Policy, score
-from spoofskipper_manager.scheduler import Sample, Scheduler
+from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.probes import DEFAULTS, sample_key
 from spoofskipper_manager.service import load_settings
 from spoofskipper_manager.state import write_json
@@ -20,7 +20,7 @@ class PolicyTests(unittest.TestCase):
         self.p = Policy()
         self.candidates = {(tag, tag): {'provider': provider, 'weight': weight} for tag, provider, weight in
                            [('a', 'preferred', 1.25), ('b', 'preferred', 1.25), ('c', 'other', 1), ('chained', 'chained', 1)]}
-        self.samples = {k: Sample(healthy=True, healthy_at=1000, latency=50,
+        self.samples = {k: Sample(health=Health.HEALTHY, healthy_at=1000, latency=50,
                                 successes=[(1000, 10, 50)]) for k in self.candidates}
         self.members = [k[0] for k in self.candidates]
 
@@ -42,7 +42,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(score(s, 1, 1000, 7200), capped)
         self.assertIsNone(score(s, 1, 8201, 7200))
         self.assertIsNotNone(score(s, 1, 8201, DEFAULTS['throughput_sweep_seconds']))
-        s.body_failed = True
+        s.health = Health.SUSPECT_BODY
         self.assertIsNone(score(s, 1, 1000, 7200))
 
     def test_hold_margin_and_mandatory_fresh_challenger(self):
@@ -63,7 +63,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_immediate_failure_last_score_unknown_fallback_and_all_failed(self):
         self.decide()
-        self.sample('a').healthy = False
+        self.sample('a').health = Health.FAILED_GATE
         self.sample('b').successes = [(0, 40, 50)]
         self.now += 1
         d = self.decide()
@@ -75,33 +75,33 @@ class PolicyTests(unittest.TestCase):
         self.sample('c').latency = 10
         self.assertEqual(self.decide().target, ('c', 'c'))
         for s in self.samples.values():
-            s.healthy = False
+            s.health = Health.FAILED_GATE
         self.assertEqual(self.decide().reason, 'all_paths_failed')
         self.assertIsNone(self.decide().target)
 
     def test_preferred_unknown_before_chained_and_strict_boundary(self):
-        self.sample('a').healthy = None
-        self.sample('b').healthy = False
+        self.sample('a').health = Health.UNKNOWN
+        self.sample('b').health = Health.FAILED_GATE
         d = self.decide(selector='proxy_deepmind')
         self.assertEqual(d.reason, 'priority_health_unknown')
         self.assertEqual(d.tests, ((('a', 'a'), 'gate'),))
-        self.sample('a').healthy = False
+        self.sample('a').health = Health.FAILED_GATE
         self.assertEqual(self.decide(selector='proxy_deepmind').target, ('chained', 'chained'))
-        self.sample('chained').healthy = False
-        self.sample('a').healthy = True
+        self.sample('chained').health = Health.FAILED_GATE
+        self.sample('a').health = Health.HEALTHY
         self.sample('a').successes = []
         self.assertEqual(self.decide('chained', 'proxy_deepmind').target, ('a', 'a'))
 
     def test_unknown_preferred_incumbent_is_not_a_provider_boundary(self):
-        self.sample('a').healthy = None
+        self.sample('a').health = Health.UNKNOWN
         d = self.decide(selector='proxy_deepmind')
         self.assertEqual(d.reason, 'hold')
         self.assertIsNone(d.target)
-        self.sample('a').healthy = False
+        self.sample('a').health = Health.FAILED_GATE
         self.assertEqual(self.decide(selector='proxy_deepmind').reason, 'health_failover')
 
     def test_return_to_preferred_retests_at_hold_and_requires_recent_throttle(self):
-        self.sample('b').healthy = False
+        self.sample('b').health = Health.FAILED_GATE
         self.sample('a').successes = [(1000, .1, 500)]  # no boundary margin
         self.sample('a').throttle_at = 1000
         self.assertEqual(self.decide('chained', 'proxy_deepmind').reason, 'hold')
@@ -118,7 +118,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNone(self.decide('chained', 'proxy_deepmind').target)
 
     def test_priority_return_pair_can_complete_more_than_thirty_seconds_apart(self):
-        self.sample('b').healthy = False
+        self.sample('b').health = Health.FAILED_GATE
         self.decide('chained', 'proxy_deepmind')
         self.now = 1300
         self.decide('chained', 'proxy_deepmind')
@@ -131,7 +131,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.decide('chained', 'proxy_deepmind').target, ('a', 'a'))
 
     def test_upstream_excludes_chained_and_stale_health_needs_gate(self):
-        self.sample('a').healthy = False
+        self.sample('a').health = Health.FAILED_GATE
         self.sample('chained').successes = [(1000, 50, 20)]
         self.assertNotEqual(self.decide(selector='chained_upstream').target, ('chained', 'chained'))
         self.now = 10000
@@ -139,7 +139,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(all(kind == 'gate' for _, kind in self.decide().tests))
 
     def test_failure_uses_last_known_score_even_beyond_sweep(self):
-        self.sample('a').healthy = False
+        self.sample('a').health = Health.FAILED_GATE
         self.sample('b').successes = [(-1000000, 40, 50)]
         self.sample('c').successes = [(1000, 1, 50)]
         self.sample('chained').successes = []
@@ -148,7 +148,7 @@ class PolicyTests(unittest.TestCase):
     def test_stale_active_score_does_not_block_fresh_challenger(self):
         self.sample('a').successes = [(-7000, 50, 20)]
         self.sample('b').successes = [(1000, 2, 50)]
-        self.sample('c').healthy = self.sample('chained').healthy = False
+        self.sample('c').health = self.sample('chained').health = Health.FAILED_GATE
         self.assertEqual(self.decide().reason, 'hold')
         self.now = 1300
         self.assertEqual(self.decide().reason, 'challenger_test')
@@ -157,7 +157,7 @@ class PolicyTests(unittest.TestCase):
         scheduler = Scheduler(lambda *args, **kw: None)
         try:
             key = ('a', 'a')
-            scheduler.samples[key] = Sample(healthy=True)
+            scheduler.samples[key] = Sample(health=Health.HEALTHY)
             scheduler.accept(key, 'throttle', {'ok': False, 'bytes': 0}, 1000)
             self.assertIsNone(scheduler.samples[key].healthy)
             scheduler.accept(key, 'gate', {'ok': True}, 1001)
@@ -258,7 +258,7 @@ class PolicySchedulingTests(unittest.TestCase):
                                  {'probes_enabled': True, 'managed_selectors': ['proxy_main'],
                                   'selector_priorities': {'proxy_deepmind': [['preferred'], ['chained']]}})
         for key, sample in self.scheduler.samples.items():
-            sample.healthy, sample.healthy_at, sample.latency = True, self.now, 50
+            sample.health, sample.healthy_at, sample.latency = Health.HEALTHY, self.now, 50
             sample.successes = [(self.now, 40 if key[0] == 'b' else 1, 50)]
             sample.last = {'gate': self.now, 'throttle': self.now, 'throughput': self.now}
         self.submitted = []
@@ -345,7 +345,7 @@ class PolicySchedulingTests(unittest.TestCase):
         chained = self.key('chained')
         future = Future()
         self.scheduler.jobs[future] = (chained, 'throughput', self.scheduler.epoch)
-        self.scheduler.samples[self.key('a')].healthy = False
+        self.scheduler.samples[self.key('a')].health = Health.FAILED_GATE
         old_client = self.scheduler.client
         self.scheduler.apply_policy(self.now)
         self.assertTrue(future.cancelled())

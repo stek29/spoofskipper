@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api, compiler, service
 from spoofskipper_manager.probes import THROTTLE, sample_key
-from spoofskipper_manager.scheduler import Sample, Scheduler
+from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.state import write_json
 
 
@@ -43,6 +43,7 @@ class RefreshFailureTests(unittest.TestCase):
                 configure(*args)
                 clients.append(manager.scheduler.client)
             real_tick = manager.scheduler.tick
+            failures = []
             def tick():
                 scheduler = manager.scheduler
                 if case in ('commit', 'stage'):
@@ -68,9 +69,14 @@ class RefreshFailureTests(unittest.TestCase):
                     else:
                         scheduler.active = {'proxy_main': 'a'}
                         for key in scheduler.samples:
-                            scheduler.samples[key] = Sample(healthy=key[0] == 'b', healthy_at=100, latency=20)
+                            scheduler.samples[key] = Sample(health=Health.HEALTHY if key[0] == 'b' else Health.FAILED_GATE, healthy_at=100, latency=20)
                         scheduler.apply_policy(100)
                     select.assert_not_called()
+            def checked_tick():
+                try:
+                    tick()
+                except AssertionError as exc:
+                    failures.append(exc)
             prepared = [old, new] if case in ('commit', 'stage') else [old, ValueError('invalid render')]
             atomic_write = service.atomic_write
             def staged_write(*args):
@@ -85,13 +91,15 @@ class RefreshFailureTests(unittest.TestCase):
                  patch.object(manager, 'prepare', side_effect=prepared), patch.object(compiler, 'check'), \
                  patch.object(service, 'atomic_write', side_effect=staged_write), \
                  patch.object(manager, 'configure_probes', side_effect=configured), \
-                 patch.object(manager.scheduler, 'tick', side_effect=tick), \
+                 patch.object(manager.scheduler, 'tick', side_effect=checked_tick), \
                  patch.object(manager.scheduler.pool, 'submit', side_effect=lambda *args: Future()) as submit, \
                  patch.object(manager, 'wait', side_effect=service.Stopping()), \
                  patch.object(clash_api, 'proxies', return_value={'proxy_main': {'now': 'a'}}), \
                  patch.object(clash_api, 'select') as select:
                 manager.child = Mock()
                 self.assertEqual(manager.run(), 0)
+            if failures:
+                raise failures[0]
 
     def test_ownership_revoked_even_if_render_fails(self):
         self.exercise('revoke')
@@ -134,7 +142,7 @@ class EvidenceTests(unittest.TestCase):
     def test_sufficient_body_prefix_restores_health_without_inventing_rate(self):
         scheduler = Scheduler(lambda *args, **kw: None)
         key = ('candidate', 'hash')
-        scheduler.samples[key] = sample = Sample(healthy=False, body_failed=True)
+        scheduler.samples[key] = sample = Sample(health=Health.FAILED_BODY)
         try:
             scheduler.accept(key, 'throughput', {'ok': True, 'bytes': THROTTLE}, 100)
             self.assertTrue(sample.healthy)
@@ -180,7 +188,7 @@ class DependencyIdentityTests(unittest.TestCase):
                                          for o in config['outbounds'][:2]], self.settings)
 
     def seed(self):
-        self.scheduler.samples[self.key] = sample = Sample(healthy=True, healthy_at=100,
+        self.scheduler.samples[self.key] = sample = Sample(health=Health.HEALTHY, healthy_at=100,
                                                           successes=[(100, 40, 20)])
         return sample
 

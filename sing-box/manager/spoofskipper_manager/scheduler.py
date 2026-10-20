@@ -1,6 +1,7 @@
 """Bounded measurements and serialized policy writes; no catch-up ticks."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from enum import Enum
 import time
 import weakref
 from . import clash_api
@@ -9,18 +10,85 @@ from .policy import Policy, score
 from .compiler import probe_outbounds, selectors, selector_members
 
 
+class Health(Enum):
+    UNKNOWN = 'unknown'
+    HEALTHY = 'healthy'
+    BODY_ONLY_BACKUP = 'body_only_backup'
+    SUSPECT_BODY = 'suspect_body'
+    FAILED_GATE = 'failed_gate'
+    FAILED_BODY = 'failed_body'
+
+
 @dataclass
 class Sample:
     latency: float | None = None
-    healthy: bool | None = None
+    health: Health = Health.UNKNOWN
     healthy_at: float = float('-inf')
     throttle_at: float = float('-inf')
     unknown_throughput: int = 0
     failures: int = 0
-    body_failed: bool = False
     corroborate: str | None = None
     successes: list[tuple[float, float, float]] = field(default_factory=list)
     last: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def healthy(self):
+        if self.health in (Health.HEALTHY, Health.BODY_ONLY_BACKUP):
+            return True
+        if self.health in (Health.FAILED_GATE, Health.FAILED_BODY):
+            return False
+        return None
+
+    @property
+    def body_failed(self):
+        return self.health in (Health.SUSPECT_BODY, Health.FAILED_BODY, Health.BODY_ONLY_BACKUP)
+
+    @property
+    def latency_or_inf(self):
+        return self.latency if self.latency is not None else float('inf')
+
+    def is_healthy(self, now, max_age):
+        return self.healthy is True and 0 <= now-self.healthy_at <= max_age
+
+    def scored(self, now, max_age):
+        if self.healthy is not True or self.body_failed:
+            return []
+        return [(rate, latency) for at, rate, latency in self.successes
+                if 0 <= now-at <= max_age]
+
+    def record(self, kind, result, now):
+        """Own health transitions; HEAD and tiny bodies never erase body failure."""
+        if kind.startswith('corroborate'):
+            if not result['ok']:
+                self.health = Health.FAILED_BODY if self.body_failed else Health.FAILED_GATE
+            elif kind == 'corroborate_body' or not self.body_failed:
+                self.health = Health.BODY_ONLY_BACKUP if self.body_failed else Health.HEALTHY
+                self.healthy_at = now
+            return
+        if result.get('latency_ms') is not None:
+            self.latency = result['latency_ms']
+        if kind == 'throughput':
+            self.unknown_throughput = self.unknown_throughput + 1 if result.get('mbps') is None else 0
+        if not result['ok']:
+            self.failures += 1
+            if kind != 'gate':
+                self.health = Health.SUSPECT_BODY
+                self.corroborate = 'corroborate_body'
+            elif self.failures >= 3:
+                self.corroborate = 'corroborate_gate'
+            return
+        self.failures = 0
+        body_ok = kind == 'throttle' or (kind == 'throughput' and
+            (result.get('mbps') is not None or result.get('bytes', 0) >= THROTTLE))
+        if not self.body_failed or body_ok:
+            self.health = Health.BODY_ONLY_BACKUP if self.body_failed else Health.HEALTHY
+            self.healthy_at = now
+        if kind == 'throttle':
+            self.throttle_at = now
+            self.health = Health.HEALTHY
+        if kind == 'throughput' and result.get('mbps') is not None:
+            self.health = Health.HEALTHY
+            self.successes = (self.successes + [(now, result['mbps'], self.latency)])[-3:]
 
     @property
     def throughput_at(self):
@@ -153,9 +221,9 @@ class Scheduler:
         groups = {}
         for key, candidate in self.candidates.items():
             sample = self.samples[key]
-            if sample.healthy and not sample.body_failed and now-sample.throughput_at <= self.settings['throughput_sweep_seconds']:
+            if sample.scored(now, self.settings['throughput_sweep_seconds']):
                 groups.setdefault(candidate['provider'], []).append(key)
-        return {p: sorted(keys, key=lambda k: self.samples[k].latency or float('inf'))[:3] for p, keys in groups.items()}
+        return {p: sorted(keys, key=lambda k: self.samples[k].latency_or_inf)[:3] for p, keys in groups.items()}
 
     def inspect(self):
         proxies = clash_api.proxies(self.config)
@@ -176,40 +244,11 @@ class Scheduler:
         return result, before == after and version == self.path_versions.get(key, 0)
 
     def accept(self, key, kind, result, now):
-        sample = self.samples[key]
-        if kind == 'corroborate_gate' or kind == 'corroborate_body':
-            if not result['ok']:
-                sample.healthy = False
-            elif kind == 'corroborate_body' or not sample.body_failed:
-                sample.healthy = True
-                sample.healthy_at = now
+        self.samples[key].record(kind, result, now)
+        if kind.startswith('corroborate'):
             self.log('probe_corroboration', candidate=key[0], kind=kind, ok=result['ok'])
             return
-        if result.get('latency_ms') is not None:
-            sample.latency = result['latency_ms']
-        if kind == 'throughput':
-            sample.unknown_throughput = sample.unknown_throughput + 1 if result.get('mbps') is None else 0
-        if result['ok']:
-            sample.failures = 0
-            body_ok = kind == 'throttle' or (kind == 'throughput' and
-                (result.get('mbps') is not None or result.get('bytes', 0) >= THROTTLE))
-            if not sample.body_failed or body_ok:
-                sample.healthy = True
-                sample.healthy_at = now
-            if kind == 'throttle':
-                sample.throttle_at = now
-                sample.body_failed = False
-            if kind == 'throughput' and result.get('mbps') is not None:
-                sample.body_failed = False
-                sample.successes = (sample.successes + [(now, result['mbps'], sample.latency)])[-3:]
-        else:
-            sample.failures += 1
-            if kind != 'gate':
-                sample.body_failed = True
-                sample.healthy = None
-                sample.corroborate = 'corroborate_body'
-            elif sample.failures >= 3:
-                sample.corroborate = 'corroborate_gate'
+        if not result['ok']:
             self.log('probe_failed', candidate=key[0], kind=kind, error=result.get('error'),
                      bytes=result['bytes'], burst_seconds=result.get('burst_seconds'))
         self.log('probe_sample', candidate=key[0], **result)
@@ -247,8 +286,8 @@ class Scheduler:
         first_sweep = self.started + cadence * int(key[1][:8], 16) / 0xffffffff
         due = sample.last['throughput'] + cadence if 'throughput' in sample.last else first_sweep
         early = (sample.unknown_throughput < 2 and key not in peers and
-                 (len(peers) < 3 or (sample.latency or float('inf')) <
-                  max(self.samples[k].latency or float('inf') for k in peers)))
+                 (len(peers) < 3 or (sample.latency_or_inf) <
+                  max(self.samples[k].latency_or_inf for k in peers)))
         if now >= due or (early and now-sample.last.get('throughput', float('-inf')) >= settings['early_test_seconds']):
             return 'throughput'
         return None
@@ -272,7 +311,7 @@ class Scheduler:
         gates = sum(kind == 'gate' for _, kind, _ in self.jobs.values())
         downloading = any(kind != 'gate' for _, kind, _ in self.jobs.values())
         shortlists = self.shortlist(now)
-        ordered = sorted(self.candidates, key=lambda k: (k not in self.requested, k[0] not in self.active.values(), self.samples[k].latency or float('inf'), k))
+        ordered = sorted(self.candidates, key=lambda k: (k not in self.requested, k[0] not in self.active.values(), self.samples[k].latency_or_inf, k))
         for key in ordered:
             if key in busy:
                 continue
@@ -356,7 +395,7 @@ class Scheduler:
                 sample = self.samples[key]
                 if sample.healthy and not sample.body_failed:
                     value = score(sample, c['weight'], now, 7200 if key[0] in self.active.values() else self.settings['throughput_sweep_seconds'])
-                    ranked.append((value is not None, value or 0, -(sample.latency or float('inf')), key[0]))
+                    ranked.append((value is not None, value or 0, -(sample.latency_or_inf), key[0]))
             best = max(ranked) if ranked else None
             choices[selector] = {'active': self.active.get(selector), 'proposed': best[3] if best else None,
                                  'proposed_score': best[1] if best and best[0] else None,

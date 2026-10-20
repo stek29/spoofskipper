@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
 from spoofskipper_manager.probes import Accounting, sample_key
-from spoofskipper_manager.scheduler import Scheduler, Sample, score
+from spoofskipper_manager.scheduler import Health, Scheduler, Sample, score
 
 
 class SchedulingTests(unittest.TestCase):
@@ -73,7 +73,7 @@ class SchedulingTests(unittest.TestCase):
 
     def test_shortlist_warmup_backfill_and_freshness(self):
         for i, (key, sample) in enumerate(self.scheduler.samples.items()):
-            sample.healthy, sample.latency = True, 10+i
+            sample.health, sample.latency = Health.HEALTHY, 10+i
             sample.last['gate'] = self.now
             if i < 3:
                 sample.successes = [(self.now, 20, 10+i)]
@@ -81,7 +81,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(len(peers), 3)
         self.scheduler.tick()
         self.assertEqual(len(self.scheduler.jobs), 0)  # no full-pool startup downloads
-        self.scheduler.samples[peers[0]].body_failed = True
+        self.scheduler.samples[peers[0]].health = Health.SUSPECT_BODY
         self.scheduler.samples[peers[0]].last['throttle'] = self.now
         self.scheduler.tick()
         self.assertEqual(len(self.scheduler.jobs), 1)  # latency-ranked replacement
@@ -144,7 +144,7 @@ class SchedulingTests(unittest.TestCase):
 
 
     def test_active_cadence_change_and_median_score(self):
-        sample = Sample(latency=999, healthy=True,
+        sample = Sample(latency=999, health=Health.HEALTHY,
                         successes=[(100, 10, 20), (101, 20, 40), (102, 50, 80)])
         expected = (20/10)**.6 * (200/40)**.4
         self.assertAlmostEqual(score(sample, 1, 103, 7200), expected)
@@ -167,7 +167,7 @@ class SchedulingTests(unittest.TestCase):
             {'type': 'selector', 'tag': 'chained_upstream', 'outbounds': ['c0']}], 'endpoints': [chained]}
         self.scheduler.configure(config, self.candidates, {'probes_enabled': True})
         for key, sample in self.scheduler.samples.items():
-            sample.healthy, sample.latency = True, 20
+            sample.health, sample.latency = Health.HEALTHY, 20
             sample.successes = [(self.now, 50 if key[0] == 'chained' else 1, 20)]
         self.scheduler.summary(self.now)
         choices = self.logs[-1][1]['selectors']
