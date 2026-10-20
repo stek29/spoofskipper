@@ -120,8 +120,6 @@ def load_settings(config_dir):
         raise ValueError('probe_port and clash_api_port must differ')
     if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
         raise ValueError('probe deadlines exceed bounded maximum')
-    if 'probe_url' in settings:
-        raise ValueError('probe_url was renamed to probe_urls (a list)')
     urls = settings.get('probe_urls', list(DEFAULT_PROBE_URLS))
     uplinks = settings.get('uplink_urls', list(DEFAULT_UPLINK_URLS))
     for name, value, minimum in (('probe_urls', urls, 1), ('uplink_urls', uplinks, 0)):
