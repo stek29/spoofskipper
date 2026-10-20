@@ -31,7 +31,15 @@ def revision(config):
     return tags[0]
 
 
-def render(template, subscriptions, scratch, settings=None, candidates=()):
+def ensure_clash_api(config, port, secret):
+    """Verification needs the Clash API; supply a loopback one if none is configured."""
+    experimental = config.setdefault('experimental', {})
+    api = experimental.get('clash_api') or {}
+    if not api.get('external_controller'):
+        experimental['clash_api'] = {**api, 'external_controller': f'127.0.0.1:{port}', 'secret': secret}
+
+
+def render(template, subscriptions, scratch, settings=None, candidates=(), api_secret=''):
     private = Path(template).parent / 'config.jsonnet'
     if private.read_text().splitlines().count(EXTVAR_LINE) != 1 or IMPORT_LINE in private.read_text():
         raise ValueError('private config requires documented subscription extVar edit')
@@ -47,6 +55,7 @@ def render(template, subscriptions, scratch, settings=None, candidates=()):
         config = json.loads(result.stdout)
     finally:
         ext.unlink(missing_ok=True)
+    ensure_clash_api(config, (settings or {}).get('clash_api_port', 19089), api_secret)
     add_probe_routes(config, settings or {}, candidates)
     handoff_selectors(config, (settings or {}).get('managed_selectors', []), candidates)
     validate(config)

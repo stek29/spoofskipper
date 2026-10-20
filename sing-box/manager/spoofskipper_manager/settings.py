@@ -39,6 +39,7 @@ class Settings(Mapping):
     throughput_seconds: float = 4
     probe_workers: int = 4
     probe_port: int = 19090
+    clash_api_port: int = 19089
     early_test_seconds: float = 1800
     probes_enabled: bool = False
     managed_selectors: tuple[str, ...] = ()
@@ -113,9 +114,11 @@ def load_settings(config_dir):
         value = settings.setdefault(key, default)
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
             raise ValueError('invalid manager deadline/cadence')
-    for key, maximum in (('probe_workers', 4), ('probe_port', 65535)):
+    for key, maximum in (('probe_workers', 4), ('probe_port', 65535), ('clash_api_port', 65535)):
         if not isinstance(settings[key], int) or settings[key] > maximum:
             raise ValueError('invalid probe worker count/port')
+    if settings['probe_port'] == settings['clash_api_port']:
+        raise ValueError('probe_port and clash_api_port must differ')
     if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
         raise ValueError('probe deadlines exceed bounded maximum')
     for key in ('probe_url', 'probe_backup_url'):

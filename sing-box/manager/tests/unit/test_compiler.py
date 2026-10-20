@@ -20,7 +20,13 @@ def config():
 class CompilerTests(unittest.TestCase):
     def test_api_validation(self):
         self.assertEqual(clash_api.credentials(config()), ('http://[::1]:9090', 'private'))
-        for address in ('192.0.2.1:9090', ':9090', 'localhost:no', '127.0.0.1:0'):
+        for address in (':9090', 'localhost:9090', '[::]:9090'):
+            c = config()
+            c['experimental']['clash_api']['external_controller'] = address
+            compiler.validate(c)
+        self.assertEqual(clash_api.credentials(c | {'experimental': {'clash_api': {
+            'external_controller': ':9090'}}}), ('http://127.0.0.1:9090', ''))
+        for address in ('192.0.2.1:9090', 'localhost:no', '127.0.0.1:0'):
             c = config()
             c['experimental']['clash_api']['external_controller'] = address
             with self.assertRaises(ValueError):
@@ -36,6 +42,18 @@ class CompilerTests(unittest.TestCase):
         c['experimental']['clash_api']['secret'] = 123
         with self.assertRaises(ValueError):
             compiler.validate(c)
+
+    def test_missing_api_gets_loopback_controller(self):
+        for api in (None, {}, {'external_controller': ''}):
+            c = {'outbounds': [{'type': 'direct', 'tag': 'direct'}]}
+            if api is not None:
+                c['experimental'] = {'clash_api': api}
+            compiler.ensure_clash_api(c, 19089, 'generated')
+            compiler.validate(c)
+            self.assertEqual(clash_api.credentials(c), ('http://127.0.0.1:19089', 'generated'))
+        c = config()
+        compiler.ensure_clash_api(c, 19089, 'generated')
+        self.assertEqual(clash_api.credentials(c), ('http://[::1]:9090', 'private'))
 
     def test_graph_validation(self):
         for outbounds in ([{'tag': 'x', 'type': 'selector', 'outbounds': ['x']}],

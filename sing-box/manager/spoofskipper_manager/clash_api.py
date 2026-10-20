@@ -14,8 +14,8 @@ def credentials(config):
         port = int(port)
         if not 0 < port < 65536 or not isinstance(secret, str):
             raise ValueError()
-        if host == 'localhost':
-            host = '127.0.0.1'
+        if host in ('', 'localhost'):
+            host = '127.0.0.1'  # An empty host listens on all interfaces.
         ip = ipaddress.ip_address(host)
         if ip.is_unspecified:
             host = '::1' if ip.version == 6 else '127.0.0.1'

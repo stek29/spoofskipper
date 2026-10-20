@@ -2,6 +2,7 @@
 import argparse
 import difflib
 import json
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -33,7 +34,8 @@ def diagnostics(args):
             text = private.read_text()
             if compiler.IMPORT_LINE in text:
                 private.write_text(compiler.edited_source(text))
-            config = compiler.render(root / 'sing.jsonnet', providers.merged(pending), temp, settings, providers.candidates(pending))
+            config = compiler.render(root / 'sing.jsonnet', providers.merged(pending), temp, settings, providers.candidates(pending),
+                                     secrets.token_hex(16))
             compiler.check(config, temp, args.core)
         providers.commit(pending)
         log('dry_run_checked', providers=len(pending))
@@ -54,7 +56,8 @@ def diagnostics(args):
         compiler.check(baseline, temp, args.core)
         private = root / 'config.jsonnet'
         private.write_text(compiler.edited_source(private.read_text()))
-        managed = compiler.render(root / 'sing.jsonnet', providers.merged(providers.snapshots), temp, settings, providers.candidates(providers.snapshots))
+        managed = compiler.render(root / 'sing.jsonnet', providers.merged(providers.snapshots), temp, settings, providers.candidates(providers.snapshots),
+                                      secrets.token_hex(16))
         compiler.check(managed, temp, args.core)
         diff = ''.join(difflib.unified_diff(
             (json.dumps(baseline, indent=2, sort_keys=True) + '\n').splitlines(True),

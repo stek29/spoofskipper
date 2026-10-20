@@ -14,6 +14,11 @@ private inputs and diagnostic diffs out of version control.
 is no longer supported; use `/config/sing.jsonnet` or the CLI `--config-dir`.
 Keep Compose's stop grace period greater than `shutdown_timeout`.
 
+The manager verifies activations through the Clash API. A configured
+`external_controller` must be loopback-reachable (an empty host such as `:9090`
+counts). Without one, the manager adds `127.0.0.1:<clash_api_port>` with a
+secret generated once and kept in `/data/clash-api-secret`.
+
 ## Settings
 
 Missing `local-manager.json` means probes disabled and no selector ownership.
@@ -41,6 +46,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `early_test_seconds` | 1800 | Early shortlist/challenge retry interval |
 | `probe_workers` | 4 | Concurrent gates, integer 1–4; body checks/downloads are serial |
 | `probe_port` | 19090 | Loopback mixed inbound port, integer 1–65535 |
+| `clash_api_port` | 19089 | Loopback Clash API port added when the config has no `external_controller` |
 | `probe_timeout` | 15 | Overall probe deadline, maximum 15 |
 | `probe_stall_timeout` | 2 | Body stall deadline |
 | `throughput_seconds` | 4 | Throughput duration, maximum 4 |

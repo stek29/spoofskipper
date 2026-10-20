@@ -1,6 +1,7 @@
 """PID 1 supervision and serialized, marker-protected activation."""
 import json
 import os
+import secrets
 import signal
 import shutil
 import subprocess
@@ -37,6 +38,7 @@ class Manager:
         self.root.mkdir(parents=True, exist_ok=True)
         self.live, self.previous, self.marker = [self.root / name for name in
                                                 ('sing.json', 'sing.prev.json', 'activating')]
+        self.api_secret = self.load_api_secret()
         # Only manager-owned abandoned temporary files are removed.
         for directory in (self.root, self.root / 'providers'):
             for path in directory.glob('.manager-*'):
@@ -55,6 +57,14 @@ class Manager:
         self.current = None
         self.scheduler = Scheduler(log)
         self.scheduler_errors = {}
+
+    def load_api_secret(self):
+        # Stable across restarts so unchanged renders keep the same revision.
+        path = self.root / 'clash-api-secret'
+        if not path.exists():
+            atomic_write(path, secrets.token_hex(16))
+            path.chmod(0o600)
+        return path.read_text().strip()
 
     def signal(self, number, _frame):
         if number == signal.SIGHUP:
@@ -233,7 +243,7 @@ class Manager:
     def prepare(self, snapshots, providers):
         with tempfile.TemporaryDirectory(prefix='.manager-', dir=self.root) as scratch:
             return compiler.render(self.config_dir / 'sing.jsonnet', providers.merged(snapshots), scratch,
-                                   self.settings, providers.candidates(snapshots))
+                                   self.settings, providers.candidates(snapshots), self.api_secret)
 
     def configure_probes(self, providers, snapshots):
         # Hash the actual rendered definitions, including private overrides.
