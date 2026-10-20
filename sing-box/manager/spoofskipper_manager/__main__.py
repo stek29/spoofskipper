@@ -1,7 +1,8 @@
 """Entry point: supervise sing-box with /config read-only and state under /data."""
 import argparse
 from .service import Manager, log
-from .subscriptions import bootstrap
+from . import parser as subscription_parser
+from .subscriptions import bootstrap, default_interface
 
 
 def main():
@@ -11,6 +12,8 @@ def main():
     parser.add_argument('--state-dir', default='/data')
     parser.add_argument('--core', default='sing-box')
     args = parser.parse_args()
+    # Subscription fetches go out directly, never through the supervised core's tun.
+    subscription_parser.BIND_INTERFACE = default_interface()
     try:
         if args.command == 'bootstrap':
             return bootstrap(args.config_dir, args.state_dir, log)

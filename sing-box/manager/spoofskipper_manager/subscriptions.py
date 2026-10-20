@@ -82,6 +82,18 @@ class Providers:
         self.snapshots = dict(snapshots)
 
 
+def default_interface(route_table='/proc/net/route'):
+    """Interface of the main table's IPv4 default route; the tun routes from its own table."""
+    try:
+        for line in Path(route_table).read_text().splitlines()[1:]:
+            fields = line.split()
+            if len(fields) > 7 and fields[1] == '00000000' and fields[7] == '00000000':
+                return fields[0]
+    except OSError:
+        pass
+    return None
+
+
 def bootstrap(config_dir, state_dir, log):
     """Seed snapshots for every provider, so the first serve starts the core before fetching.
 

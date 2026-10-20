@@ -5,8 +5,10 @@ Keep this module free of manager imports: sing-subs loads it directly.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import re
+import socket
 import time
 import urllib.parse
 import urllib.request
@@ -22,6 +24,56 @@ MAX_BODY_BYTES = 16 * 1024 * 1024
 FETCH_DEADLINE_SECONDS = 60
 
 
+# Set by the manager: inside the core's network namespace an unbound socket is
+# captured by the tun and routed like LAN traffic without its domain. Binding to the
+# main table's default-route interface sends fetches directly, as from the host.
+BIND_INTERFACE: str | None = None
+
+
+def _bind(sock: socket.socket) -> None:
+    if BIND_INTERFACE and hasattr(socket, "SO_BINDTODEVICE"):
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, BIND_INTERFACE.encode())
+        except OSError:
+            pass  # Unprivileged: keep normal routing.
+
+
+def _create_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, *_):
+    error = None
+    for family, kind, proto, _, sockaddr in socket.getaddrinfo(*address, 0, socket.SOCK_STREAM):
+        sock = socket.socket(family, kind, proto)
+        try:
+            _bind(sock)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            error = exc
+            sock.close()
+    raise error or OSError("no address")
+
+
+def _bound(connection_class):
+    def connection(*args, **kwargs):
+        instance = connection_class(*args, **kwargs)
+        instance._create_connection = _create_connection
+        return instance
+    return connection
+
+
+class _BoundHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_bound(http.client.HTTPConnection), req)
+
+
+class _BoundHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_bound(http.client.HTTPSConnection), req, context=self._context)
+
+
 def fetch_url(url: str) -> str:
     request = urllib.request.Request(
         url,
@@ -33,7 +85,9 @@ def fetch_url(url: str) -> str:
     # The socket timeout bounds each read; the deadline bounds a slow drip.
     deadline = time.monotonic() + FETCH_DEADLINE_SECONDS
     body = bytearray()
-    with urllib.request.urlopen(request, timeout=30) as response:
+    urlopen = (urllib.request.build_opener(_BoundHTTPHandler, _BoundHTTPSHandler).open
+               if BIND_INTERFACE else urllib.request.urlopen)
+    with urlopen(request, timeout=30) as response:
         while chunk := response.read1(65536):
             body += chunk
             if len(body) > MAX_BODY_BYTES:

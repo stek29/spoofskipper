@@ -129,3 +129,34 @@ class SubscriptionTests(unittest.TestCase):
         with patch.object(parser, 'fetch_url', return_value='trojan://s@localhost:443#one'):
             self.assertEqual(subs.bootstrap(self.config, self.state, log), 0)
         self.assertEqual(set(self.providers().snapshots), {'a', 'b'})
+
+    def test_default_interface_from_main_route_table(self):
+        table = self.root / 'route'
+        table.write_text('Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n'
+                         'eth0\t0037A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\n'
+                         'eth0\t00000000\t0237A8C0\t0003\t0\t0\t0\t00000000\n')
+        self.assertEqual(subs.default_interface(table), 'eth0')
+        table.write_text('Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n')
+        self.assertIsNone(subs.default_interface(table))  # Internal network: no binding.
+        self.assertIsNone(subs.default_interface(self.root / 'missing'))
+
+    def test_bound_fetch_binds_every_socket(self):
+        import http.server, threading
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'trojan://s@localhost:443#one')
+            def log_message(self, *_):
+                pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        bound = []
+        with patch.object(parser, 'BIND_INTERFACE', 'lo'), \
+                patch.object(parser, '_bind', bound.append), \
+                patch.object(parser.urllib.request, 'urlopen', side_effect=AssertionError('unbound')):
+            body = parser.fetch_url(f'http://127.0.0.1:{server.server_port}/')
+        self.assertEqual(body, 'trojan://s@localhost:443#one')
+        self.assertEqual(len(bound), 1)
