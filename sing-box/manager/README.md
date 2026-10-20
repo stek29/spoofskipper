@@ -55,8 +55,8 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
 
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch.
-Subscription specs retain the existing format and require unique, nonempty
-provider prefixes. Local proxy leaves are discovered from the rendered graph;
+Subscription specs retain the existing format; provider prefixes must be unique
+(a missing prefix is `''`, as in `sing-subs`). Local proxy leaves are discovered from the rendered graph;
 direct/block/DNS entries are excluded. Protocols have no special preference.
 
 For example, these synthetic settings prefer two subscription providers equally
