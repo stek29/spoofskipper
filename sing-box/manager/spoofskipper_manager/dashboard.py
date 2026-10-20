@@ -95,7 +95,7 @@ def _managed(scheduler, selector, now, shortlisted):
         terms = score_terms(scheduler.samples[pool.active], now, ACTIVE_SCORE_MAX_AGE)
         incumbent = None if terms is None else scheduler.candidates[pool.active].weight * terms[2] * terms[3]
     keys = [key for key in scheduler.candidates if key.tag in members]
-    rows = [_row(scheduler, pool, key, tiers, now, shortlisted, incumbent) for key in keys]
+    rows = [_row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent) for key in keys]
     # Policy order: tier first (excluded last), then score, then latency.
     rows.sort(key=lambda r: (INF if r['tier'] == 'excluded' else r['tier'] or 0,
                              r['score'] is None, -(r['score'] or 0), r['latency'] if r['latency'] is not None else INF, r['tag']))
@@ -111,17 +111,18 @@ def _managed(scheduler, selector, now, shortlisted):
             'unmeasured': sorted(members - measured)}
 
 
-def _row(scheduler, pool, key, tiers, now, shortlisted, incumbent):
+def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
     sample, candidate, settings = scheduler.samples[key], scheduler.candidates[key], scheduler.settings
     current = key == pool.active
-    active = key.tag in scheduler.active.values()  # current somewhere, possibly in another selector
+    active = key.tag in scheduler.active.values()  # current somewhere: active probe cadence
+    elsewhere = sorted(tag for tag, leaf in scheduler.active.items() if leaf == key.tag and tag != selector)
     max_age = ACTIVE_SCORE_MAX_AGE if current else SCORE_MAX_AGE
     terms = score_terms(sample, now, max_age)
     value = None if terms is None else candidate.weight * terms[2] * terms[3]
     tier = None if tiers is None else pool.priorities.get(key, 'excluded')
     last = lambda probe: sample.last.get(probe, -INF)
     healthy = sample.health is Health.HEALTHY
-    role = 'active' if active else 'shortlist' if key in shortlisted else 'rotation' if healthy else None
+    role = 'current' if current else 'shortlist' if key in shortlisted else 'rotation' if healthy and not active else None
     # Next due times follow Scheduler.next_test; requests and confirmations come first.
     gate = last(Probe.GATE) + (settings.gate_active_seconds if active else settings.gate_standby_seconds)
     if healthy:
@@ -166,7 +167,7 @@ def _row(scheduler, pool, key, tiers, now, shortlisted, incumbent):
             'window': max_age, 'score': value,
             'terms': None if terms is None else dict(zip(('mbps', 'latency', 'rate_factor', 'latency_factor'), terms)),
             'margin': margin, 'probes': probes, 'role': role,
-            'flags': [f'running {p}' for p in running] + ([f'requested {requested.value}'] if requested else [])
+            'flags': [f'active in {tag}' for tag in elsewhere] + [f'running {p}' for p in running] + ([f'requested {requested.value}'] if requested else [])
                      + ([f'confirm {sample.confirm.value}'] if sample.confirm else [])}
 
 

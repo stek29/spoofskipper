@@ -61,6 +61,8 @@ class DashboardTests(unittest.TestCase):
         self.assertAlmostEqual(b['score'], score(sample, 1.0, self.now, ACTIVE_SCORE_MAX_AGE))
         self.assertEqual((a['eligibility'], b['eligibility']), ('eligible', 'healthy, higher tier preferred'))
         self.assertTrue(evil['eligibility'].startswith('excluded'))
+        # Roles are relative to this selector; another selector's choice is only noted.
+        self.assertEqual((a['role'], a['flags'], b['role']), (None, ['active in native'], 'current'))
 
     def test_render_escapes_and_omits_secrets(self):
         body = render(snapshot(self.scheduler, self.config, self.now, wall=0), self.now + 2, 0)
