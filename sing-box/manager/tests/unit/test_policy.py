@@ -117,6 +117,19 @@ class PolicyTests(unittest.TestCase):
         self.now = 1333
         self.assertIsNone(self.decide('chained', 'proxy_deepmind').target)
 
+    def test_priority_return_pair_can_complete_more_than_thirty_seconds_apart(self):
+        self.sample('b').healthy = False
+        self.decide('chained', 'proxy_deepmind')
+        self.now = 1300
+        self.decide('chained', 'proxy_deepmind')
+        self.sample('a').successes = [(1301, 10, 50)]
+        self.now = 1335
+        self.assertEqual(self.decide('chained', 'proxy_deepmind').tests,
+                         ((('a', 'a'), 'throttle'),))
+        self.sample('a').throttle_at = 1336
+        self.now = 1336
+        self.assertEqual(self.decide('chained', 'proxy_deepmind').target, ('a', 'a'))
+
     def test_upstream_excludes_chained_and_stale_health_needs_gate(self):
         self.sample('a').healthy = False
         self.sample('chained').successes = [(1000, 50, 20)]

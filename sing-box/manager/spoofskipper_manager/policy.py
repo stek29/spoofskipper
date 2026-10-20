@@ -99,15 +99,20 @@ class Policy:
             pending = self.pending[selector]
         since = pending[1]
         s = samples[best]
-        fresh = s.throughput_at >= since and now-s.throughput_at <= 30
+        # Priority checks share a challenge boundary. Serial downloads may take
+        # longer than the freshness window; use the later completion for the pair.
+        measured_at = max(s.throughput_at, s.throttle_at) if boundary else s.throughput_at
+        waiting_for_pair = boundary and s.throttle_at < since
+        fresh = s.throughput_at >= since and (waiting_for_pair or now-measured_at <= 30)
         tests = []
         if not fresh:
             tests.append((best, 'throughput'))
-        if boundary and (s.throttle_at < since or now-s.throttle_at > 30):
+        if boundary and (s.throttle_at < since or (s.throughput_at >= since and now-measured_at > 30)):
             tests.append((best, 'throttle'))
         if tests:
             return Decision(None, 'priority_return_test' if boundary else 'challenger_test', tuple(tests))
-        if s.body_failed or value(best, 30) is None:
+        score_age = max(30, now-s.throughput_at) if boundary else 30
+        if s.body_failed or value(best, score_age) is None:
             return Decision(None, 'challenger_performance_unknown')
         if not boundary:
             incumbent = value(active, 7200)

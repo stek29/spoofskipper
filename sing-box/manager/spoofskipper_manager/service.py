@@ -3,6 +3,8 @@ import json
 import math
 import os
 import signal
+import ssl
+from urllib.parse import urlsplit
 import shutil
 import subprocess
 import tempfile
@@ -65,8 +67,6 @@ def load_settings(config_dir):
     if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
         raise ValueError('probe_ca_bundle must be a file path')
     if settings.get('probes_enabled', False):
-        import ssl
-        from urllib.parse import urlsplit
         ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
         for key, default in (('probe_url', 'https://speed.cloudflare.com/__down?bytes={bytes}'),
                              ('probe_backup_url', 'https://proof.ovh.net/files/1Mb.dat')):
@@ -93,15 +93,18 @@ class Manager:
         self.live, self.previous, self.marker = [self.root / name for name in
                                                 ('sing.json', 'sing.prev.json', 'activating')]
         # Only manager-owned abandoned temporary files are removed.
-        for path in self.root.glob('.manager-*'):
-            shutil.rmtree(path) if path.is_dir() else path.unlink()
+        for directory in (self.root, self.root / 'providers'):
+            for path in directory.glob('.manager-*'):
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
         try:
             self.settings = load_settings(self.config_dir)
         except (ValueError, OSError):
             if not self.live.exists():
                 raise
-            self.settings = dict(DEFAULTS)
-            log('settings_invalid_using_saved_config')
+            self.settings = {**DEFAULTS, **PROBE_DEFAULTS, 'probes_enabled': False,
+                             'managed_selectors': [], 'provider_weights': {}, 'selector_priorities': {}}
+            log('settings_invalid_using_saved_config', probes_enabled=False, managed_selectors=[],
+                fallback='native_selectors')
         self.child = None
         self.stopping = None
         self.reload_requested = False
@@ -198,9 +201,10 @@ class Manager:
         if old is not None:
             atomic_write(self.previous, self.live.read_bytes())
             atomic_write(self.marker, 'activating\n')
-        write_json(self.live, config)
-        self.scheduler.invalidate()
+        verified = False
         try:
+            write_json(self.live, config)
+            self.scheduler.invalidate()
             if self.alive():
                 self.child.send_signal(signal.SIGHUP)
             else:
@@ -214,6 +218,9 @@ class Manager:
                         log('selector_handoff', selector=tag, candidate=leaf)
         except (OSError, ValueError):
             verified = False
+        finally:
+            if old is None and not verified:
+                remove(self.live)
         if verified:
             self.current = config
             remove(self.marker)
@@ -339,7 +346,10 @@ class Manager:
                             # Retain fetched snapshots in memory: runtime retries do not refetch.
                             self.wait(backoff)
                             backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
-                self.scheduler.tick()
+                try:
+                    self.scheduler.tick()
+                except Exception as exc:
+                    log('scheduler_tick_failed', error=type(exc).__name__)
                 self.wait(0.1)
         except Stopping:
             log('shutdown_requested', signal=self.stopping)

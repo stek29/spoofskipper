@@ -34,6 +34,17 @@ def wait(predicate):
 
 with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
     root = Path(temp)
+    # Restore both release inputs, just as the operator runbook requires.
+    legacy_ref = os.environ.get('MANAGER_LEGACY_REF', 'b03a046')
+    for filename in ('docker-compose.yml', '.env'):
+        restored = subprocess.run(['git', 'show', f'{legacy_ref}:{filename}'],
+                                  cwd=ROOT, check=True, capture_output=True).stdout
+        (root / filename).write_bytes(restored)
+    restored = json.loads(docker('compose', '--env-file', str(root / '.env'),
+        '-f', str(root / 'docker-compose.yml'), 'config', '--format', 'json'))
+    legacy_service = restored['services']['sing-tun']
+    assert legacy_service['command'] == ['run', '-c', '/tmp/sing.json']
+    assert legacy_service['image'].endswith('-1'), 'restore the pre-cutover image version'
     config, data = root / 'config', root / 'data'
     shutil.copytree(Path(__file__).parent / 'fixtures', config)
     data.mkdir()
@@ -76,10 +87,16 @@ with tempfile.TemporaryDirectory(prefix='manager-rollback-') as temp:
         observed = docker('run', '--rm', '--network', 'none', '--entrypoint', '/bin/cat', *volumes,
                       'spoofskipper-legacy:stage1', '/config/config.jsonnet')
         assert observed == original.encode(), 'restored template differs'
-        docker('run', '-d', '--name', name, '--network', 'none', '--user', str(os.getuid()),
-               '--read-only', '--tmpfs', '/tmp', *volumes,
-               '-e', 'CONFIG_TMPL=/config/sing.jsonnet', 'spoofskipper-legacy:stage1',
-               'run', '-c', '/tmp/sing.json')
+        # Only isolate mounts/network/privileges and substitute the preloaded
+        # legacy image. The command comes from the restored release Compose file.
+        rehearsal = root / 'rollback-compose.json'
+        rehearsal.write_text(json.dumps({'services': {'legacy': {
+            'image': 'spoofskipper-legacy:stage1', 'command': legacy_service['command'],
+            'container_name': name, 'network_mode': 'none', 'user': str(os.getuid()),
+            'read_only': True, 'tmpfs': ['/tmp'],
+            'environment': {'CONFIG_TMPL': '/config/sing.jsonnet'},
+            'volumes': [f'{config}:/config:ro', f'{data}:/data']}}}))
+        docker('compose', '-p', name, '-f', str(rehearsal), 'up', '-d', '--pull', 'never')
         wait(lambda: docker('inspect', '-f', '{{.State.Running}}', name).strip() == b'true')
         # Wait for rendering/startup, then inspect the actual core API from the
         # baseline container's network namespace using the preloaded new image.

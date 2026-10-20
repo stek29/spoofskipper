@@ -1,4 +1,7 @@
 #!/bin/sh
 set -eu
+if [ -n "${ZAPRET_PRERUN:-}" ]; then
+    eval "${ZAPRET_PRERUN}"
+fi
 export PYTHONPATH=/opt/manager
 exec python3 -m spoofskipper_manager "$@"

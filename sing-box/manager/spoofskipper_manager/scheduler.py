@@ -15,6 +15,7 @@ class Sample:
     healthy: bool | None = None
     healthy_at: float = float('-inf')
     throttle_at: float = float('-inf')
+    unknown_throughput: int = 0
     failures: int = 0
     body_failed: bool = False
     corroborate: str | None = None
@@ -186,6 +187,8 @@ class Scheduler:
             return
         if result.get('latency_ms') is not None:
             sample.latency = result['latency_ms']
+        if kind == 'throughput':
+            sample.unknown_throughput = sample.unknown_throughput + 1 if result.get('mbps') is None else 0
         if result['ok']:
             sample.failures = 0
             body_ok = kind == 'throttle' or (kind == 'throughput' and
@@ -243,7 +246,9 @@ class Scheduler:
         # Spread first sweeps across the interval; shortlist bootstrap bypasses this.
         first_sweep = self.started + cadence * int(key[1][:8], 16) / 0xffffffff
         due = sample.last['throughput'] + cadence if 'throughput' in sample.last else first_sweep
-        early = key not in peers and (len(peers) < 3 or sample.latency < max(self.samples[k].latency for k in peers))
+        early = (sample.unknown_throughput < 2 and key not in peers and
+                 (len(peers) < 3 or (sample.latency or float('inf')) <
+                  max(self.samples[k].latency or float('inf') for k in peers)))
         if now >= due or (early and now-sample.last.get('throughput', float('-inf')) >= settings['early_test_seconds']):
             return 'throughput'
         return None

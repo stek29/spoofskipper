@@ -1,4 +1,4 @@
-# Outbound manager (stage 3)
+# Outbound manager
 
 The container runs the Python manager as PID 1. It starts saved `/data/sing.json`
 first, applies current cached inputs, then refreshes subscriptions at startup and
@@ -6,6 +6,10 @@ every two hours. `/reload` sends SIGHUP only: it renders cached subscriptions an
 current private settings without fetching. Selectors and native URLTest behavior
 come from the existing Jsonnet. Set `probes_enabled: true` for measurements. Add
 individual selectors to `managed_selectors` to enable verified policy writes.
+
+`ZAPRET_PRERUN` remains an optional shell hook before manager startup.
+`CONFIG_TMPL` is no longer supported: the manager always reads
+`/config/sing.jsonnet` (or its diagnostic `--config-dir`).
 
 Private inputs are read-only `/config/sing.jsonnet`, `config.jsonnet`,
 `local-subs-config.json` (existing format, unique nonempty provider `prefix`), and
@@ -45,7 +49,7 @@ Do not commit private settings or the legacy template.
 Disable **only** the subscription cron job and verify no refresh is running before
 starting this image. Keep the pre-cutover image tag and crontab. Seed `/data/providers`
 from a checked scratch dry-run; do not replace the running core's `cache.db`.
-Stage 1 settings are `probes_enabled: false`, `managed_selectors: []` (also the
+Initial settings are `probes_enabled: false`, `managed_selectors: []` (also the
 missing-file defaults). No deployment or push is part of local implementation.
 
 ## Scratch diagnostics
@@ -88,7 +92,10 @@ An unexpected child exit causes nonzero manager exit and Docker restart.
 
 For full rollback: stop the manager image; restore `config.jsonnet.legacy`; run
 `sing-subs/merge-subs.py` once with the private specs to update `local-subs.json`;
-start the pre-cutover image on the same `/data`; restore the subscription cron job
+restore the pre-cutover `docker-compose.yml` and `.env` (for example from the
+pre-cutover commit). Verify `sing-tun.command` is `['run', '-c', '/tmp/sing.json']`
+and `.env` selects the saved image tag, then start that image through Compose on
+the same `/data`; restore the subscription cron job
 and verify exactly one scheduler. The old image ignores all manager state.
 
 ## Tests
