@@ -193,6 +193,8 @@ class Scheduler:
                 else:
                     self.log('probe_discarded', candidate=key.tag, reason='reload_or_upstream_change')
             except Exception as exc:
+                if key in self.samples:
+                    self.samples[key].outcomes[probe] = 'discarded (error)'
                 self.log('probe_discarded', candidate=key.tag, reason=type(exc).__name__)
 
     def accept_or_hold(self, key, result, now):
@@ -200,6 +202,7 @@ class Scheduler:
         if result.ok or not self.settings.uplink_urls:
             self.accept(key, result, at)
         elif self.uplink_down:
+            self.samples[key].outcomes[result.probe] = 'discarded (uplink down)'
             self.log('probe_discarded', candidate=key.tag, reason='uplink_down')
         elif self.uplink is None and now - self.uplink_checked_at < UPLINK_FRESH_SECONDS:
             self.accept(key, result, at)
@@ -291,6 +294,7 @@ class Scheduler:
                     continue
                 downloading = True
             sample.last[probe] = now
+            sample.outcomes.pop(probe, None)  # The new attempt's result replaces it.
             if probe is Probe.THROUGHPUT and key in rotation:
                 self.rotated_at[rotation[key]] = now
             if sample.confirm is probe:

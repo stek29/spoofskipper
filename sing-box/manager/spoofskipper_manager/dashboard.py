@@ -132,7 +132,8 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
     throughput = (None if not healthy else last(Probe.THROUGHPUT) + settings.throughput_active_seconds if active
                   else last(Probe.THROUGHPUT) + settings.throughput_shortlist_seconds if role == 'shortlist'
                   else scheduler.rotated_at.get(candidate.provider, -INF) + settings.throughput_rotation_seconds)
-    probes = {probe.value: {'last_age': _age(now, last(probe)), 'due_in': None if due is None else max(0, due-now)}
+    probes = {probe.value: {'last_age': _age(now, last(probe)), 'outcome': sample.outcomes.get(probe),
+                            'due_in': None if due is None else max(0, due-now)}
               for probe, due in ((Probe.GATE, gate), (Probe.THROTTLE, throttle), (Probe.THROUGHPUT, throughput))}
     if tier == 'excluded':
         eligibility = 'excluded: provider not in tiers'
@@ -321,12 +322,14 @@ def _selector(x):
                        f'{r["failures"]} failures' + (f' ({r["failed_probe"]})' if r['failed_probe'] else ''),
                        f'healthy {_ago(r["healthy_age"])}', f'latency {_num(r["latency"], 0)} ms')
         eligibility = _tone(r['eligibility'], eligibility_tones.get(r['eligibility']))
-        probes = ''.join(f'<div>{e(name)} <span class=sub>{e(_ago(p["last_age"]))} · next {e(_due(p["due_in"]))}</span></div>'
+        probes = ''.join(f'<div>{e(name)} <span class=sub>{e(_ago(p["last_age"]))}'
+                         + (f', {e(p["outcome"])}' if p['outcome'] and p['last_age'] is not None else '')
+                         + f' · next {e(_due(p["due_in"]))}</span></div>'
                          for name, p in r['probes'].items())
         classes.append('cur' if r['current'] else 'off' if r['tier'] == 'excluded' or r['health'] == 'failed' else None)
         rows.append([e(i), _cell(e(r['tag']), r['provider']),
                      e('—' if r['tier'] is None else r['tier']), e(f'{r["weight"]:g}'), health, eligibility,
-                     samples, score, margin, probes, _cell(e(r['role'] or '—'), *r['flags'])])
+                     samples, score, margin, probes, _cell(e(r['role'] or ('' if r['flags'] else '—')), *r['flags'])])
     return (f'<h2>{e(x["tag"])}</h2>' + _kv(pairs)
             + _table(['#', 'candidate', 'tier', 'weight', 'health', 'eligibility', 'samples',
                       'score', 'vs current', 'probes', 'role'], rows, classes))

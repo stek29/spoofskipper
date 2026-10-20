@@ -29,6 +29,7 @@ class Sample:
     confirm: Probe | None = None  # repeat this probe now to confirm a failure
     successes: list[tuple[float, float, float]] = field(default_factory=list)  # (at, mbps, latency)
     last: dict[Probe, float] = field(default_factory=dict)  # submission times
+    outcomes: dict[Probe, str] = field(default_factory=dict)  # what each kind's latest attempt yielded
 
     @property
     def healthy(self):
@@ -57,6 +58,7 @@ class Sample:
         if result.latency_ms is not None and primary:
             self.latency = result.latency_ms
         if not result.ok:
+            self.outcomes[probe] = f'failed ({result.error})' if result.error else 'failed'
             self.failures, self.failed_probe = self.failures + 1, probe
             if self.failures < failures_to_fail:
                 self.confirm = probe
@@ -64,6 +66,7 @@ class Sample:
                 self.health, self.failed_at = Health.FAILED, now
             return
         if probe is Probe.GATE:
+            self.outcomes[probe] = 'ok'
             self.reachable_at = now
             # A tiny response says nothing about throttling: it clears only gate
             # failures and keeps proven health fresh, but cannot make an unknown
@@ -74,7 +77,12 @@ class Sample:
                 self.healthy_at = now
             return
         if not result.passed_threshold:
+            self.outcomes[probe] = 'too slow, below threshold'
             return  # Slow but alive within the time box: no new evidence.
         self.failures, self.health, self.healthy_at, self.threshold_at = 0, Health.HEALTHY, now, now
+        self.outcomes[probe] = ('passed' if probe is Probe.THROTTLE else f'{result.mbps:.1f} Mbps' if result.mbps is not None
+                                else 'no rate: too slow to measure')
+        if not primary:
+            self.outcomes[probe] += ' (fallback endpoint, not scored)'
         if result.mbps is not None and primary:
             self.successes = (self.successes + [(now, result.mbps, self.latency)])[-3:]

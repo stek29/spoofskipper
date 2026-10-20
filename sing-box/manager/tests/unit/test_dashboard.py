@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api
 from spoofskipper_manager.dashboard import render, snapshot
 from spoofskipper_manager.policy import score
+from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
 from spoofskipper_manager.samples import Health
 from spoofskipper_manager.scheduler import Scheduler
 from spoofskipper_manager.settings import ACTIVE_SCORE_MAX_AGE
@@ -73,6 +74,17 @@ class DashboardTests(unittest.TestCase):
             self.assertNotIn(secret, body)
         self.assertIn('https://probe.test/x?bytes={bytes}', body)
         self.assertIn('No snapshot yet', render(None, 0, 0))
+
+    def test_probe_outcomes_show_what_an_attempt_yielded(self):
+        sample = next(s for k, s in self.scheduler.samples.items() if k.tag == 'a')
+        for probe, outcome in ((Probe.GATE, 'failed (timeout)'), (Probe.THROUGHPUT, 'no rate: too slow to measure')):
+            sample.record(ProbeResult(probe, ok=probe is not Probe.GATE, error='timeout' if probe is Probe.GATE else None,
+                                      bytes=THROTTLE), self.now)
+            self.assertEqual(sample.outcomes[probe], outcome)
+        sample.record(ProbeResult(Probe.THROUGHPUT, ok=True, bytes=THROTTLE, mbps=42.25), self.now)
+        body = render(snapshot(self.scheduler, self.config, self.now, wall=0), self.now, 0)
+        self.assertIn('42.2 Mbps', body)
+        self.assertIn('failed (timeout)', body)
 
 
 if __name__ == '__main__':
