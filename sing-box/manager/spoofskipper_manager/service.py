@@ -12,7 +12,7 @@ from .state import atomic_write, write_json, remove
 from .subscriptions import Providers
 from .scheduler import Scheduler
 from .clash_api import resolve
-from .settings import Settings, load_settings
+from .settings import Settings, load_settings, SCHEDULER_ERROR_LOG_SECONDS
 
 
 def log(event, **fields):
@@ -54,6 +54,7 @@ class Manager:
         self.reload_requested = False
         self.current = None
         self.scheduler = Scheduler(log)
+        self.scheduler_errors = {}
 
     def signal(self, number, _frame):
         if number == signal.SIGHUP:
@@ -240,6 +241,19 @@ class Manager:
         candidates = [{**tags[o['tag']], 'outbound': o} for o in self.current.get('outbounds', []) if o['tag'] in tags]
         self.scheduler.configure(self.current, candidates, self.settings)
 
+    def tick_scheduler(self):
+        try:
+            self.scheduler.tick()
+        except Exception as exc:
+            error = type(exc).__name__
+            now = time.monotonic()
+            count, last_logged = self.scheduler_errors.get(error, (0, float('-inf')))
+            count += 1
+            if now-last_logged >= SCHEDULER_ERROR_LOG_SECONDS:
+                log('scheduler_tick_failed', error=error, count=count)
+                last_logged = now
+            self.scheduler_errors[error] = count, last_logged
+
     def run(self):
         for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(number, self.signal)
@@ -311,10 +325,7 @@ class Manager:
                             # Retain fetched snapshots in memory: runtime retries do not refetch.
                             self.wait(backoff)
                             backoff = min(backoff * 2, self.settings['bootstrap_backoff_max_seconds'])
-                try:
-                    self.scheduler.tick()
-                except Exception as exc:
-                    log('scheduler_tick_failed', error=type(exc).__name__)
+                self.tick_scheduler()
                 self.wait(0.1)
         except Stopping:
             log('shutdown_requested', signal=self.stopping)

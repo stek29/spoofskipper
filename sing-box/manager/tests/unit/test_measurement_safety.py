@@ -78,7 +78,35 @@ class MeasurementSafetyTests(unittest.TestCase):
                  patch.object(manager, 'stop_child'), patch.object(service, 'log') as log:
                 self.assertEqual(manager.run(), 0)
                 self.assertEqual(tick.call_count, 2)
-                log.assert_any_call('scheduler_tick_failed', error='TypeError')
+                log.assert_any_call('scheduler_tick_failed', error='TypeError', count=1)
+
+    def test_repeated_tick_errors_are_rate_limited_by_type_and_counted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            manager = service.Manager(temp, Path(temp) / 'state')
+            manager.child = Mock()
+            now = [1000.]
+            try:
+                with patch.object(service.time, 'monotonic', side_effect=lambda: now[0]), \
+                     patch.object(manager.scheduler, 'tick') as tick, patch.object(service, 'log') as log:
+                    tick.side_effect = TypeError('measurement')
+                    for _ in range(100):
+                        manager.tick_scheduler()
+                    self.assertEqual(log.call_count, 1)
+                    log.assert_called_once_with('scheduler_tick_failed', error='TypeError', count=1)
+                    self.assertEqual(manager.scheduler_errors['TypeError'][0], 100)
+                    now[0] += 60
+                    manager.tick_scheduler()
+                    log.assert_called_with('scheduler_tick_failed', error='TypeError', count=101)
+                    tick.side_effect = ValueError('another measurement')
+                    manager.tick_scheduler()
+                    log.assert_called_with('scheduler_tick_failed', error='ValueError', count=1)
+                    tick.side_effect = None
+                    manager.tick_scheduler()
+                    self.assertEqual(tick.call_count, 103)
+                    self.assertEqual(log.call_count, 3)
+                    manager.child.send_signal.assert_not_called()
+            finally:
+                manager.scheduler.close()
 
     def test_stop_during_first_verification_removes_unverified_config(self):
         with tempfile.TemporaryDirectory() as temp:

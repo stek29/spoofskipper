@@ -130,6 +130,50 @@ class PolicyTests(unittest.TestCase):
         self.now = 1336
         self.assertEqual(self.decide('chained', 'proxy_deepmind').target, ('a', 'a'))
 
+    def test_priority_return_rejects_thirty_minute_pair_gap(self):
+        self.sample('b').health = Health.FAILED_GATE
+        self.decide('chained', 'proxy_deepmind')
+        self.now = 1300
+        self.decide('chained', 'proxy_deepmind')
+        self.sample('a').successes = [(1301, 10, 50)]
+        self.sample('a').last['throughput'] = 1301
+        self.now = 3101
+        for sample in self.samples.values():
+            sample.healthy_at = self.now
+        self.sample('a').throttle_at = self.now
+        decision = self.decide('chained', 'proxy_deepmind')
+        self.assertIsNone(decision.target)
+        self.assertIn((('a', 'a'), 'throughput'), decision.tests)
+        self.assertEqual(self.p.pending['proxy_deepmind'][1], self.now)
+
+    def test_priority_pair_gap_is_bounded_by_freshness_plus_probe_timeout(self):
+        for gap, accepted in ((45, True), (45.1, False)):
+            with self.subTest(gap=gap):
+                self.p = Policy()
+                self.sample('b').health = Health.FAILED_GATE
+                self.now = 1000
+                self.decide('chained', 'proxy_deepmind')
+                self.now = 1300
+                self.decide('chained', 'proxy_deepmind')
+                self.sample('a').successes = [(1301, 10, 50)]
+                self.sample('a').throttle_at = 1301 + gap
+                self.now = self.sample('a').throttle_at
+                decision = self.decide('chained', 'proxy_deepmind')
+                self.assertEqual(decision.target is not None, accepted)
+                if not accepted:
+                    self.assertIn((('a', 'a'), 'throughput'), decision.tests)
+
+    def test_waiting_for_throttle_does_not_keep_throughput_fresh_indefinitely(self):
+        self.sample('b').health = Health.FAILED_GATE
+        self.decide('chained', 'proxy_deepmind')
+        self.now = 1300
+        self.decide('chained', 'proxy_deepmind')
+        self.sample('a').successes = [(1301, 10, 50)]
+        self.now = 1347
+        decision = self.decide('chained', 'proxy_deepmind')
+        self.assertEqual({kind for _, kind in decision.tests}, {'throughput', 'throttle'})
+        self.assertEqual(self.p.pending['proxy_deepmind'][1], self.now)
+
     def test_upstream_excludes_chained_and_stale_health_needs_gate(self):
         self.sample('a').health = Health.FAILED_GATE
         self.sample('chained').successes = [(1000, 50, 20)]
@@ -322,6 +366,60 @@ class PolicySchedulingTests(unittest.TestCase):
         self.scheduler.tick()
         self.assertEqual(self.api['proxy_deepmind']['now'], 'b')
         self.assertEqual(self.api['proxy_main']['now'], 'a')
+
+    def test_expired_pair_requests_new_throughput_without_early_retry_delay(self):
+        self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['proxy_deepmind'])
+        self.scheduler.controller.inspect()
+        policy = self.scheduler.controller.policy
+        policy.observe('proxy_deepmind', 'chained', self.now)
+        key = self.key('b')
+        policy.pending['proxy_deepmind'] = (key, 1300)
+        self.now = 3102
+        for sample in self.scheduler.samples.values():
+            sample.healthy_at = self.now
+        sample = self.scheduler.samples[key]
+        sample.successes = [(1301, 40, 50)]
+        sample.throttle_at = 3101
+        sample.last.update(throughput=1301, throttle=3101)
+        self.scheduler.controller.apply_policy(self.now)
+        self.assertEqual(self.scheduler.requested[key], 'throughput')
+        self.assertEqual(policy.pending['proxy_deepmind'][1], self.now)
+        self.write.assert_not_called()
+
+    def test_discarded_or_cancelled_priority_throttle_is_requested_immediately(self):
+        for discard in ('path_change', 'reload', 'worker_error'):
+            with self.subTest(discard=discard):
+                # Start each challenge after the hold, with fresh throughput.
+                self.scheduler.invalidate()
+                self.scheduler.restart_client()
+                self.scheduler.controller.policy = Policy()
+                self.scheduler.settings = self.scheduler.settings.with_changes(managed_selectors=['proxy_deepmind'])
+                self.api['proxy_deepmind']['now'] = 'chained'
+                self.scheduler.tick()
+                self.now += 300
+                for sample in self.scheduler.samples.values():
+                    sample.last['gate'] = sample.last['throttle'] = self.now-1
+                self.scheduler.tick()
+                self.finish('throughput', mbps=40)
+                self.scheduler.tick()
+                key = self.key('b')
+                future = next(future for future, (candidate, kind, _) in self.scheduler.jobs.items()
+                              if candidate == key and kind == 'throttle')
+                previous = self.scheduler.samples[key].last['throttle']
+                if discard == 'reload':
+                    self.scheduler.invalidate()
+                    self.scheduler.restart_client()
+                elif discard == 'worker_error':
+                    future.set_exception(OSError('discarded worker'))
+                else:
+                    future.set_result(({'ok': True}, False))
+                self.now += .1
+                self.scheduler.tick()
+                self.assertEqual(self.api['proxy_deepmind']['now'], 'chained')
+                self.assertIn((key, 'throttle', self.scheduler.epoch), self.scheduler.jobs.values())
+                self.assertGreater(self.scheduler.samples[key].last['throttle'], previous)
+                self.assertLess(self.now-previous, 1)
+                self.write.assert_not_called()
 
     def test_unknown_challenger_result_does_not_cause_download_loop(self):
         self.scheduler.tick()

@@ -73,7 +73,9 @@ not configurable cadences. Scores use the last three successful throughput/laten
 samples, capped at 50 Mbps and weighted by provider. Active scores expire after
 two hours. Elective switches require a new post-hold challenger measurement.
 Return from a working lower tier requires post-hold throughput and throttle
-checks, with freshness judged within 30 seconds of the pair's later completion.
+checks no more than `30 + probe_timeout` seconds apart, with the throttle
+completed within 30 seconds of the decision. An expired pair starts a new
+challenge immediately; discarded attempts can be retried immediately.
 
 Three failed gates request backup HEAD. Body failures require body evidence;
 HEAD/tiny successes cannot clear them. Throughput skips 512 KiB and stops at four
@@ -178,3 +180,7 @@ include partial attempts, CONNECT/HTTP requests, headers/framing, received bodie
 skipped prefixes and backups. `body_received` counts consumed decoded body bytes;
 received bytes also include buffer read-ahead. TLS/transport overhead and unread
 server buffers are excluded. These are application counters, not billing totals.
+
+Repeated `scheduler_tick_failed` errors are logged at most once per error type
+per minute, with a cumulative `count`. The manager keeps retrying ticks and
+supervising the core.

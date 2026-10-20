@@ -178,6 +178,8 @@ class Scheduler:
                 future.result()
             except Exception:
                 pass
+        for key, kind, _ in self.jobs.values():
+            self.discard_attempt(key, kind)
         self.jobs.clear()
 
     def restart_client(self):
@@ -219,6 +221,12 @@ class Scheduler:
                      bytes=result['bytes'], burst_seconds=result.get('burst_seconds'))
         self.log('probe_sample', candidate=key[0], **result)
 
+    def discard_attempt(self, key, kind):
+        if key in self.samples:
+            self.samples[key].last.pop(kind, None)
+            if kind.startswith('corroborate'):
+                self.samples[key].corroborate = kind
+
     def collect(self, now):
         for future, (key, kind, epoch) in list(self.jobs.items()):
             if not future.done():
@@ -230,8 +238,10 @@ class Scheduler:
                     self.accept(key, kind, result, result.pop('completed_at', now))
                     self.samples[key].last[kind] = now  # Never catch up missed runs.
                 else:
+                    self.discard_attempt(key, kind)
                     self.log('probe_discarded', candidate=key[0], reason='reload_or_upstream_change')
             except Exception as exc:
+                self.discard_attempt(key, kind)
                 self.log('probe_discarded', candidate=key[0], reason=type(exc).__name__)
 
     def next_test(self, key, peers, now):

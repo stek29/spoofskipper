@@ -137,10 +137,23 @@ class Policy:
             self.pending[selector] = (best, pool.now)
         since = self.pending[selector][1]
         sample = pool.samples[best]
-        tests = self.challenge_tests(best, sample, since, pool.now, boundary)
+        pair_window = FRESH_SAMPLE_SECONDS + pool.settings['probe_timeout']
+        if boundary and sample.throughput_at >= since:
+            throttle_done = sample.throttle_at >= since
+            if throttle_done:
+                pair_expired = (abs(sample.throttle_at-sample.throughput_at) > pair_window or
+                                pool.now-sample.throttle_at > FRESH_SAMPLE_SECONDS)
+            else:
+                pair_expired = pool.now-sample.throughput_at > pair_window
+            if pair_expired:
+                # A new boundary permits an immediate bounded retry, but never
+                # turns failed/unknown results into an unbounded download loop.
+                self.pending[selector] = (best, pool.now)
+                since = pool.now
+        tests = self.challenge_tests(best, sample, since, pool.now, boundary, pair_window)
         if tests:
             return Decision(None, 'priority_return_test' if boundary else 'challenger_test', tests)
-        score_age = max(FRESH_SAMPLE_SECONDS, pool.now-sample.throughput_at) if boundary else FRESH_SAMPLE_SECONDS
+        score_age = FRESH_SAMPLE_SECONDS + pair_window if boundary else FRESH_SAMPLE_SECONDS
         if sample.body_failed or pool.value(best, score_age) is None:
             return Decision(None, 'challenger_performance_unknown')
         if not boundary:
@@ -150,15 +163,19 @@ class Policy:
         return Decision(best, 'priority_return' if boundary else 'score_improvement')
 
     @staticmethod
-    def challenge_tests(best, sample, since, now, boundary):
-        # The two serial priority-return checks share one challenge boundary.
-        measured_at = max(sample.throughput_at, sample.throttle_at) if boundary else sample.throughput_at
-        waiting_for_pair = boundary and sample.throttle_at < since
-        fresh = sample.throughput_at >= since and (waiting_for_pair or now-measured_at <= FRESH_SAMPLE_SECONDS)
+    def challenge_tests(best, sample, since, now, boundary, pair_window):
+        if not boundary:
+            fresh = sample.throughput_at >= since and now-sample.throughput_at <= FRESH_SAMPLE_SECONDS
+            return () if fresh else ((best, 'throughput'),)
+        throughput_done = sample.throughput_at >= since
+        throttle_done = sample.throttle_at >= since
+        pair_close = abs(sample.throttle_at-sample.throughput_at) <= pair_window
+        waiting_for_pair = not throttle_done and now-sample.throughput_at <= pair_window
+        throughput_fresh = throughput_done and (waiting_for_pair or
+            (pair_close and now-sample.throttle_at <= FRESH_SAMPLE_SECONDS))
         tests = []
-        if not fresh:
+        if not throughput_fresh:
             tests.append((best, 'throughput'))
-        throttle_stale = sample.throughput_at >= since and now-measured_at > FRESH_SAMPLE_SECONDS
-        if boundary and (sample.throttle_at < since or throttle_stale):
+        if not throttle_done or now-sample.throttle_at > FRESH_SAMPLE_SECONDS:
             tests.append((best, 'throttle'))
         return tuple(tests)
