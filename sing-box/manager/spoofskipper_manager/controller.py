@@ -7,12 +7,22 @@ from .probes import Probe
 from .settings import ACTIVE_SCORE_MAX_AGE, CHALLENGE_RETRY_SECONDS, SCORE_MAX_AGE
 
 
+def retry_in(last, probe, since, now, settings):
+    """Seconds until a requested test may be submitted again; at most 0 means now."""
+    # Run each requested test once per decision; retry failed or
+    # unknown results at the normal cadence rather than every tick.
+    if last < since:
+        return 0
+    return (settings.gate_active_seconds if probe is Probe.GATE else CHALLENGE_RETRY_SECONDS) - (now-last)
+
+
 class SelectorController:
     def __init__(self, measurements, log):
         self.measurements, self.log = measurements, log
         self.policy = Policy()
         self.last_decisions = {}
         self.decisions = {}
+        self.decided_at = {}  # when each selector's current decision signature began
 
     def revoke(self, selectors):
         for tag in selectors:
@@ -21,6 +31,7 @@ class SelectorController:
             self.policy.pending.pop(tag, None)
             self.last_decisions.pop(tag, None)
             self.decisions.pop(tag, None)
+            self.decided_at.pop(tag, None)
 
     def inspect(self):
         measurements = self.measurements
@@ -44,10 +55,7 @@ class SelectorController:
             pending = self.policy.pending.get(selector)
             for key, probe in decision.tests:
                 last = measurements.samples[key].last.get(probe, float('-inf'))
-                # Run each requested test once per decision; retry failed or
-                # unknown results at the normal cadence rather than every tick.
-                interval = measurements.settings.gate_active_seconds if probe is Probe.GATE else CHALLENGE_RETRY_SECONDS
-                if last < decision.since or now-last >= interval:
+                if retry_in(last, probe, decision.since, now, measurements.settings) <= 0:
                     measurements.requested.setdefault(key, probe)
             target = decision.target
             compared = []
@@ -62,7 +70,7 @@ class SelectorController:
             signature = (decision.reason, target, pending)
             if self.last_decisions.get(selector) != signature:
                 self.log('selector_decision', selector=selector, reason=decision.reason, compared=compared)
-                self.last_decisions[selector] = signature
+                self.last_decisions[selector], self.decided_at[selector] = signature, now
             if target is None or target.tag == measurements.active[selector]:
                 continue
             try:

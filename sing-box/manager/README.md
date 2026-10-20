@@ -55,6 +55,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probe_urls` | Cloudflare `__down`, then the OVH 100 MiB file | Verified HTTPS endpoints: the first is measured, later ones confirm failures |
 | `uplink_urls` | `https://ya.ru/`, `https://yastatic.net/` | HTTPS URLs reached directly, never through a proxy; empty disables the uplink check |
 | `probe_ca_bundle` | System trust | Optional trusted CA file |
+| `dashboard_listen` | absent (disabled) | `ip:port` (IPv6 as `[addr]:port`) of the read-only status page |
 
 Subscription bodies are limited to 16 MiB and 60 seconds per fetch. Fetches bind to
 the interface of the main table's default route, so they leave directly (as a host
@@ -143,6 +144,22 @@ Approximate probe traffic with default cadences, for fast paths:
 
 Slow paths read less, because throughput is time-boxed.
 
+## Status page
+
+With `dashboard_listen` set, the manager serves one read-only HTML page at `/`
+showing its current in-memory state: settings, uplink, every selector's choice
+and, for managed selectors, the last decision, hold and pending challenge, and a
+table of candidates in policy order (tier, then score) with health, samples, the
+score breakdown, the 15% margin against the current choice and probe due times.
+The main loop copies a plain snapshot at most once a second between scheduler
+ticks; a daemon thread renders it, so a slow client never blocks supervision.
+It shows tags, provider names and numbers only, never outbound definitions,
+subscription URLs or the Clash API secret. Its CSP allows nothing but the page's own
+stylesheet and sandboxes it (no scripts, forms or framing); errors carry the same headers.
+There is no authentication: bind it to a LAN address, for example the sing-tun
+container IP (`"dashboard_listen": "192.168.55.9:9091"`), then `/reload`.
+Invalid settings fall back to defaults, which also disables the page.
+
 ## Enable and disable
 
 1. Save the pre-cutover `docker-compose.yml`, `.env`, image tag and crontab.
@@ -220,6 +237,7 @@ Core/Jsonnet error output is suppressed in logs to protect secrets.
 | `probe_inspection_failed`, `scheduler_tick_failed` | Measurement/control error logged while the core remains running |
 | `selector_decision`, `selector_switched`, `selector_handoff`, `selector_write_failed` | Policy reason, verified write or write failure |
 | `shutdown_requested`, `manager_failed` | Requested shutdown or startup failure |
+| `dashboard_listening`, `dashboard_failed`, `dashboard_snapshot_failed` | Status page bound, bind failed (retried on the next settings load), or snapshot error (logged once until it recovers) |
 
 Repeated `scheduler_tick_failed` errors are logged at most once per error type
 per minute, with a cumulative `count`. The manager keeps retrying ticks and

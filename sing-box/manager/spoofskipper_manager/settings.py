@@ -1,5 +1,6 @@
 """Immutable runtime settings and fixed policy/supervision bounds."""
 from collections.abc import Mapping
+import ipaddress
 from dataclasses import dataclass, fields, field, replace
 import json
 import math
@@ -54,6 +55,7 @@ class Settings:
     probe_urls: tuple[str, ...] = DEFAULT_PROBE_URLS
     uplink_urls: tuple[str, ...] = DEFAULT_UPLINK_URLS
     probe_ca_bundle: str | None = None
+    dashboard_listen: str | None = None  # 'host:port' of the read-only status page
 
     def __post_init__(self):
         object.__setattr__(self, 'managed_selectors', tuple(self.managed_selectors))
@@ -127,9 +129,29 @@ def load_settings(config_dir):
             raise ValueError(f'{name} must be a list of distinct URLs')
     if 'probe_ca_bundle' in settings and not isinstance(settings['probe_ca_bundle'], str):
         raise ValueError('probe_ca_bundle must be a file path')
+    if 'dashboard_listen' in settings:
+        if dashboard_address(settings['dashboard_listen'])[1] in (settings['probe_port'], settings['clash_api_port']):
+            raise ValueError('dashboard port must differ from probe_port and clash_api_port')
     if settings.get('probes_enabled', False):
         ssl.create_default_context(cafile=settings.get('probe_ca_bundle'))
         for url in map(urlsplit, urls + uplinks):
             if url.scheme != 'https' or not url.hostname or url.username or url.fragment:
                 raise ValueError('probe endpoint must be HTTPS')
     return Settings.from_mapping(settings)
+
+
+def dashboard_address(value):
+    """An IP literal (IPv6 in brackets) and a port; hostnames are not resolved."""
+    try:
+        host, port = value.rsplit(':', 1)
+        if host.startswith('['):
+            if not host.endswith(']'):
+                raise ValueError()
+            address = ipaddress.IPv6Address(host[1:-1])
+        else:
+            address = ipaddress.IPv4Address(host)
+        if not port.isdigit() or not 0 < int(port) < 65536:
+            raise ValueError()
+    except (ValueError, AttributeError):
+        raise ValueError('dashboard_listen must be "ip:port"') from None
+    return str(address), int(port)

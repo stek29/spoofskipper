@@ -26,6 +26,8 @@ INVALID = [
                    ['https://example.test/'] * 2, [1], [['https://example.test/']])),
     *({'probes_enabled': True, 'uplink_urls': urls}
       for urls in ('https://ya.ru/', ['http://ya.ru/'], [{}])),
+    *({'dashboard_listen': address} for address in
+      ('9090', 'host.lan:9090', '0.0.0.0:0', '[::1:9090', '::1:9090', ':9090', None, '127.0.0.1:19090')),
 ]
 
 
@@ -58,6 +60,7 @@ class SettingsTests(unittest.TestCase):
             settings.provider_weights['p'] = 3
         self.assertEqual(settings.with_changes(managed_selectors=()).managed_selectors, ())
         self.assertEqual(settings.managed_selectors, ('choice',))
+        self.assertEqual(self.load({'dashboard_listen': '[::]:9091'}).dashboard_listen, '[::]:9091')
         self.assertIs(Settings.from_mapping(settings), settings)
 
 

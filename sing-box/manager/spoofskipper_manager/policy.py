@@ -8,13 +8,19 @@ from .samples import Health
 from .settings import HOLD, MARGIN, ACTIVE_SCORE_MAX_AGE, FRESH_SAMPLE_SECONDS, SCORE_MAX_AGE
 
 
-def score(sample, weight, now, max_age):
+def score_terms(sample, now, max_age):
+    """Median rate and latency of the last three samples in the window, and their factors."""
     recent = sample.scored(now, max_age)
     if not recent:
         return None
     rate = statistics.median(rate for rate, _ in recent[-3:])
     latency = statistics.median(latency for _, latency in recent[-3:])
-    return weight * (min(rate, RATE_CAP_MBPS)/10)**.6 * (200/max(latency, 20))**.4
+    return rate, latency, (min(rate, RATE_CAP_MBPS)/10)**.6, (200/max(latency, 20))**.4
+
+
+def score(sample, weight, now, max_age):
+    terms = score_terms(sample, now, max_age)
+    return None if terms is None else weight * terms[2] * terms[3]
 
 
 @dataclass

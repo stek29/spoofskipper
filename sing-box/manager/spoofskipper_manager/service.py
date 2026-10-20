@@ -12,6 +12,7 @@ from . import compiler, clash_api
 from .state import atomic_write, write_json, remove
 from .subscriptions import Providers
 from .scheduler import Scheduler
+from .dashboard import Dashboard
 from .clash_api import resolve
 from .settings import Settings, load_settings, SCHEDULER_ERROR_LOG_SECONDS
 
@@ -50,6 +51,7 @@ class Manager:
         self.current = None
         self.scheduler = Scheduler(log)
         self.scheduler_errors = {}
+        self.dashboard = Dashboard(log)
 
     def read_settings(self):
         # Invalid manager settings must not block routing or subscription refresh:
@@ -265,6 +267,8 @@ class Manager:
                 log('scheduler_tick_failed', error=error, count=count)
                 last_logged = now
             self.scheduler_errors[error] = count, last_logged
+        # Snapshots are built here, between ticks, so the page never reads live state.
+        self.dashboard.refresh(self.scheduler, self.current)
 
     def start_saved(self):
         try:
@@ -286,6 +290,7 @@ class Manager:
         for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(number, self.signal)
         try:
+            self.dashboard.listen(self.settings.dashboard_listen)
             self.recover_interrupted()
             if self.live.exists():
                 self.start_saved()
@@ -317,6 +322,7 @@ class Manager:
                     self.reload_requested = False
                     try:
                         self.settings = self.read_settings()
+                        self.dashboard.listen(self.settings.dashboard_listen)
                         self.scheduler.restrict(self.settings)
                         providers = Providers(self.config_dir, self.root, self.settings, log)
                         if pending is None:
@@ -354,6 +360,7 @@ class Manager:
         except RecoveryFailed:
             return 1
         finally:
+            self.dashboard.close()
             self.scheduler.close()
             self.stop_child()
             # Reap any orphaned descendants when running as container PID 1.

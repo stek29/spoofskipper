@@ -11,6 +11,8 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 MANAGER = Path(__file__).resolve().parents[2]
@@ -134,6 +136,26 @@ class LifecycleTests(LifecycleHarness):
         self.assertIn('static_one', json.dumps(self.live()))  # The operator's own local-subs.json.
         self.assertIsNone(self.proc.poll())
         self.assertNotIn('bootstrap_waiting_for_providers', self.logs())
+
+    def test_dashboard_serves_a_read_only_page(self):
+        address = f'127.0.0.1:{free_port()}'
+        write_json(self.config / 'local-manager.json', {**self.settings, 'dashboard_listen': address})
+        self.start()
+        self.ready()
+        wait_for(lambda: 'dashboard_listening' in self.logs())
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        page = lambda: opener.open(f'http://{address}/', timeout=2)
+        wait_for(lambda: b'__spoofskipper_revision_' in page().read())
+        with page() as response:
+            self.assertIn("default-src 'none'", response.headers['Content-Security-Policy'])
+            self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
+            body = response.read().decode()
+        self.assertNotIn('synthetic-test-secret', body)
+        self.assertNotIn('trojan://', body)
+        for request in (f'http://{address}/proxies', urllib.request.Request(f'http://{address}/', b'x')):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                opener.open(request, timeout=2)
+            self.assertIn('sandbox', error.exception.headers['Content-Security-Policy'])
 
     def test_bootstrap_seed_starts_core_before_fetching(self):
         # Providers are reachable only through the old core: seed first, then cut over offline.
