@@ -135,16 +135,16 @@ class Manager:
             log('interrupted_activation_restored')
 
     def activate(self, config):
+        if self.current is not None and not self.alive():
+            log('unexpected_core_exit', returncode=self.child.returncode if self.child else None)
+            raise RecoveryFailed('core died outside activation')
+        if self.current == config:
+            log('activation_unchanged', revision=compiler.revision(config))
+            return
         with tempfile.TemporaryDirectory(prefix='.manager-', dir=self.root) as scratch:
             compiler.check(config, scratch, self.core)
         if self.stopping:
             raise Stopping()
-        if self.current is not None and not self.alive():
-            log('unexpected_core_exit', returncode=self.child.returncode if self.child else None)
-            raise RecoveryFailed('core died outside activation')
-        if self.current == config and self.alive():
-            log('activation_unchanged', revision=compiler.revision(config))
-            return
         managed = self.settings.managed_selectors
         choices, selections = self.capture_choices(managed)
         old = self.current

@@ -172,7 +172,7 @@ the tracked suite; it is not a supported test interface for this runtime.
 | Events | Operator meaning |
 |---|---|
 | `core_started`, `saved_config_started`, `revision_verified` | Core startup and verified configuration |
-| `activation_succeeded`, `activation_unchanged` | Checked render activated or already running |
+| `activation_succeeded`, `activation_unchanged` | Checked render activated, or identical config already running (not re-checked) |
 | `activation_failed`, `revision_timeout`, `rollback_succeeded` | New config failed; inspect recovery outcome |
 | `rollback_failed`, `selector_rollback_failed`, `unexpected_core_exit` | Recovery failed or core died; investigate before rollout |
 | `interrupted_activation_restored` | Interrupted activation recovered from previous JSON |

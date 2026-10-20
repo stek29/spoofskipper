@@ -60,17 +60,23 @@ class SchedulingTests(unittest.TestCase):
         key = sample_key(self.candidates[0]['outbound'])
         self.scheduler.samples[key].successes = [(self.now, 10, 30)]
         self.scheduler.tick()
+        # An identical reload keeps in-flight probes and accepts their results.
         self.scheduler.configure(self.config, self.candidates, {'probes_enabled': True})
         self.assertEqual(self.scheduler.samples[key].successes, [(self.now, 10, 30)])
         self.complete()
         self.scheduler.last_inspect = self.now
         self.scheduler.tick()
-        self.assertTrue(any(e == 'probe_discarded' for e, _ in self.logs))
+        self.assertFalse(any(e == 'probe_discarded' for e, _ in self.logs))
+        self.assertTrue(any(e == 'probe_sample' for e, _ in self.logs))
+        # A changed reload discards work that crossed it.
+        self.assertTrue(self.scheduler.jobs)
         changed = copy.deepcopy(self.candidates)
         changed[0]['outbound']['bind_interface'] = 'new'
         self.scheduler.configure({'outbounds': [c['outbound'] for c in changed]}, changed, {'probes_enabled': True})
         self.assertNotIn(key, self.scheduler.samples)
         self.complete()
+        self.scheduler.tick()
+        self.assertTrue(any(e == 'probe_discarded' for e, _ in self.logs))
 
     def test_shortlist_warmup_backfill_and_freshness(self):
         for i, (key, sample) in enumerate(self.scheduler.samples.items()):

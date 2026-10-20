@@ -94,7 +94,7 @@ class CompilerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     load_settings(temp)
 
-    def test_activation_rollback_once_and_noop_checked(self):
+    def test_activation_rollback_once_and_noop_skips_check(self):
         with tempfile.TemporaryDirectory() as temp:
             m = Manager(temp, Path(temp) / 'state')
             old = config()
@@ -114,7 +114,7 @@ class CompilerTests(unittest.TestCase):
                 self.assertFalse(m.marker.exists())
                 self.assertEqual((start.call_count, stop.call_count), (1, 1))
                 m.activate(old)
-                self.assertEqual(check.call_count, 2)
+                self.assertEqual(check.call_count, 1)  # Unchanged config is not re-checked.
 
     def test_interrupted_marker_and_abandoned_temp(self):
         with tempfile.TemporaryDirectory() as temp:

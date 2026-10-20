@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu
 if [ -n "${ZAPRET_PRERUN:-}" ]; then
     eval "${ZAPRET_PRERUN}"

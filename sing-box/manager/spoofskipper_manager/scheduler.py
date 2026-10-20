@@ -116,11 +116,17 @@ class Scheduler:
         self.clients = weakref.WeakSet()
         self.controller = SelectorController(self, log)
         self.requested = {}
+        self.configured = None
 
     def configure(self, config, candidates, settings):
+        settings = Settings.from_mapping(settings)
+        enabled = settings.probes_enabled
+        if (config == self.config and settings == self.settings and list(candidates) == self.configured
+                and (self.client is not None) == enabled):
+            return  # Unchanged reloads keep in-flight probes and their results.
+        self.configured = list(candidates)
         self.epoch += 1
-        self.config, self.settings = config, Settings.from_mapping(settings)
-        enabled = settings.get('probes_enabled', False)
+        self.config, self.settings = config, settings
         subscribed = {c['outbound']['tag']: c for c in candidates}
         entries = []
         if enabled:
