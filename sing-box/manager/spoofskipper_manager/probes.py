@@ -200,14 +200,11 @@ class ProbeClient:
                     raise
                 if not data:
                     raise ValueError('truncated body')
-                self.accounting.add(body_received=len(data))
                 before, body = body, body + len(data)
                 if burst is None and body >= 16384:
                     burst = self.clock() - connection.first_byte
                 if kind == 'throughput':
-                    skip = min(body, SKIP) - min(before, SKIP)
-                    skipped += skip
-                    self.accounting.add(skipped=skip)
+                    skipped += min(body, SKIP) - min(before, SKIP)
                     if body >= SKIP and post_started is None:
                         post_started = self.clock()
                     scored = body - SKIP
@@ -216,7 +213,6 @@ class ProbeClient:
                         early = True
                         break
             if not head and not ranged and not early and response.read1(1):
-                self.accounting.add(body_received=1)
                 body += 1
                 raise ValueError('oversized body')
             result.update(ok=True, early_stop=early)
@@ -234,8 +230,10 @@ class ProbeClient:
             first = connection.first_byte if connection else None
             result.update(bytes=body, skipped=skipped, seconds=self.clock()-started,
                           latency_ms=(first-started)*1000 if first is not None else None, burst_seconds=burst)
+            # Socket-level sent/received bytes are counted as they happen; the rest once here.
             self.accounting.add(probes=1, partial=int(not result['ok']), corroboration=int(backup),
-                                early_stops=int(result.get('early_stop', False)))
+                                early_stops=int(result.get('early_stop', False)),
+                                body_received=body, skipped=skipped)
         return result
 
     def run(self, outbound, kind):
