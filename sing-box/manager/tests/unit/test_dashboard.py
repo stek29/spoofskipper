@@ -59,7 +59,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual((a['margin']['kind'], b['margin']['kind'], evil['margin']), ('priority_return', 'current', None))
         self.assertEqual(deep['decision']['reason'], 'hold')
         sample = next(s for k, s in self.scheduler.samples.items() if k.tag == 'b')
-        self.assertAlmostEqual(b['score'], score(sample, 1.0, self.now, ACTIVE_SCORE_MAX_AGE))
+        self.assertAlmostEqual(b['score'], score(sample, 1.0, self.now, ACTIVE_SCORE_MAX_AGE, 150))
         self.assertEqual((a['eligibility'], b['eligibility']), ('eligible', 'healthy, higher tier preferred'))
         self.assertTrue(evil['eligibility'].startswith('excluded'))
         # Roles are relative to this selector; another selector's choice is only noted.

@@ -4,7 +4,8 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from spoofskipper_manager.probes import THROTTLE, SKIP, Probe, ProbeResult
+from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
+SKIP = 4 * 1024 * 1024
 from spoofskipper_manager.samples import Health, Sample
 
 

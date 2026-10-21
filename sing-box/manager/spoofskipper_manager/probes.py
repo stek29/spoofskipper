@@ -15,23 +15,20 @@ from .settings import Settings
 
 # Throttling middleboxes let small responses through and stall the connection
 # after a few dozen KiB, so health is proven only past THROTTLE bytes.
-THROTTLE, SKIP = 256 * 1024, 1024 * 1024
-# Throughput is scored up to RATE_CAP_MBPS: a sample stops at SCORED_MAX bytes
-# after SKIP (slow start), or once EVIDENCE bytes show a rate above the cap.
+THROTTLE = 256 * 1024
+# Throughput byte budgets and its scored cap are settings (see Settings.throughput_bytes).
 # Requests ask for no more than is read (Cloudflare also refuses some larger sizes).
-RATE_CAP_MBPS, SCORED_MAX, EVIDENCE = 100, 8 * 1024 * 1024, 4 * 1024 * 1024
-TOTAL = SKIP + SCORED_MAX
 
 
 class Probe(str, Enum):
     """One request per probe; the kinds differ only in their byte budget."""
     GATE = 'gate'              # 1 byte: reachability and latency
     THROTTLE = 'throttle'      # 256 KiB: the connection survives the threshold
-    THROUGHPUT = 'throughput'  # up to 9 MiB: rate after the first 1 MiB
+    THROUGHPUT = 'throughput'  # skip + max bytes: rate after the skipped prefix
 
-    @property
-    def budget(self):
-        return {Probe.GATE: 1, Probe.THROTTLE: THROTTLE, Probe.THROUGHPUT: TOTAL}[self]
+    def budget(self, settings):
+        skip, _, scored_max = settings.throughput_bytes()
+        return {Probe.GATE: 1, Probe.THROTTLE: THROTTLE, Probe.THROUGHPUT: skip + scored_max}[self]
 
 
 @dataclass
@@ -179,7 +176,9 @@ class ProbeClient:
     def run(self, outbound, probe, endpoint=0):
         probe = Probe(probe)
         started = self.clock()
-        expected = probe.budget
+        expected = probe.budget(self.settings)
+        skip, evidence, scored_max = self.settings.throughput_bytes()
+        cap = self.settings.rate_cap_mbps
         connection = response = None
         body = 0
         post_started = burst = None
@@ -222,19 +221,19 @@ class ProbeClient:
                 if burst is None and body >= 16384:
                     burst = self.clock() - connection.first_byte
                 if probe is Probe.THROUGHPUT:
-                    if body >= SKIP and post_started is None:
+                    if body >= skip and post_started is None:
                         post_started = self.clock()
-                    scored = body - SKIP
+                    scored = body - skip
                     elapsed = self.clock() - post_started if post_started is not None else 0
-                    if scored >= SCORED_MAX or (scored >= EVIDENCE and elapsed > 0 and scored*8/elapsed/1e6 > RATE_CAP_MBPS):
+                    if scored >= scored_max or (scored >= evidence and elapsed > 0 and scored*8/elapsed/1e6 > cap):
                         result.early_stop = True
                         break
             if not result.early_stop and response.read1(1):
                 body += 1
                 raise ValueError('oversized body')
             result.ok = True
-            if probe is Probe.THROUGHPUT and body-SKIP >= THROTTLE:
-                result.mbps = (body-SKIP)*8/max(self.clock()-post_started, .000001)/1e6
+            if probe is Probe.THROUGHPUT and body-skip >= THROTTLE:
+                result.mbps = (body-skip)*8/max(self.clock()-post_started, .000001)/1e6
         except (OSError, ValueError, http.client.HTTPException) as exc:
             result.error = type(exc).__name__
         finally:
@@ -245,7 +244,7 @@ class ProbeClient:
                 with self.lock:
                     self.connections.discard(connection)
             first = connection.first_byte if connection else None
-            result.bytes, result.skipped = body, min(body, SKIP) if probe is Probe.THROUGHPUT else 0
+            result.bytes, result.skipped = body, min(body, skip) if probe is Probe.THROUGHPUT else 0
             result.seconds = self.clock() - started
             result.latency_ms = (first-started)*1000 if first is not None else None
             result.burst_seconds = burst

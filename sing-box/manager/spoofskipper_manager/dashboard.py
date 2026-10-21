@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from . import compiler
 from .controller import retry_in
 from .policy import eligible_pool, score_terms
-from .probes import Probe, RATE_CAP_MBPS
+from .probes import Probe
 from .samples import Health
 from .settings import ACTIVE_SCORE_MAX_AGE, HOLD, MARGIN, SCORE_MAX_AGE, dashboard_address
 
@@ -56,11 +56,18 @@ def snapshot(scheduler, config, now, wall=None):
     except ValueError:
         revision = None
     shortlisted = scheduler.shortlist(now) if scheduler.candidates else set()
+    providers = sorted({c.provider for c in scheduler.candidates.values()} | set(settings.provider_shortlist_sizes)
+                       | set(settings.provider_rotation_seconds))
     page = {'wall': time.time() if wall is None else wall, 'taken': now, 'revision': revision,
             'settings': {'probes_enabled': settings.probes_enabled,
                          'managed_selectors': list(settings.managed_selectors),
                          'selector_priorities': {t: [list(x) for x in tiers] for t, tiers in settings.selector_priorities.items()},
                          'provider_weights': dict(settings.provider_weights),
+                         'rate_cap_mbps': settings.rate_cap_mbps,
+                         'throughput_mib': (settings.throughput_skip_mib, settings.throughput_evidence_mib,
+                                            settings.throughput_max_mib),
+                         'shortlist': {p: settings.shortlist_for(p) for p in providers},
+                         'rotation': {p: settings.rotation_for(p) for p in providers},
                          'probe_urls': [_public(url) for url in settings.probe_urls]},
             'probing': scheduler.client is not None, 'candidates': len(scheduler.candidates),
             'uplink': {'enabled': bool(settings.uplink_urls), 'down': scheduler.uplink_down,
@@ -92,7 +99,7 @@ def _managed(scheduler, selector, now, shortlisted):
                       'retry_in': max(0, retry_in(last, probe, decision.since, now, settings))})
     incumbent = None
     if pool.active is not None:
-        terms = score_terms(scheduler.samples[pool.active], now, ACTIVE_SCORE_MAX_AGE)
+        terms = score_terms(scheduler.samples[pool.active], now, ACTIVE_SCORE_MAX_AGE, settings.rate_cap_mbps)
         incumbent = None if terms is None else scheduler.candidates[pool.active].weight * terms[2] * terms[3]
     keys = [key for key in scheduler.candidates if key.tag in members]
     rows = [_row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent) for key in keys]
@@ -117,7 +124,7 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
     active = key.tag in scheduler.active.values()  # current somewhere: active probe cadence
     elsewhere = sorted(tag for tag, leaf in scheduler.active.items() if leaf == key.tag and tag != selector)
     max_age = ACTIVE_SCORE_MAX_AGE if current else SCORE_MAX_AGE
-    terms = score_terms(sample, now, max_age)
+    terms = score_terms(sample, now, max_age, settings.rate_cap_mbps)
     value = None if terms is None else candidate.weight * terms[2] * terms[3]
     tier = None if tiers is None else pool.priorities.get(key, 'excluded')
     last = lambda probe: sample.last.get(probe, -INF)
@@ -131,7 +138,7 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
         throttle = now if sample.reachable_at > last(Probe.THROTTLE) else None
     throughput = (None if not healthy else last(Probe.THROUGHPUT) + settings.throughput_active_seconds if active
                   else last(Probe.THROUGHPUT) + settings.throughput_shortlist_seconds if role == 'shortlist'
-                  else scheduler.rotated_at.get(candidate.provider, -INF) + settings.throughput_rotation_seconds)
+                  else scheduler.rotated_at.get(candidate.provider, -INF) + settings.rotation_for(candidate.provider))
     probes = {probe.value: {'last_age': _age(now, last(probe)), 'outcome': sample.outcomes.get(probe),
                             'due_in': None if due is None else max(0, due-now)}
               for probe, due in ((Probe.GATE, gate), (Probe.THROTTLE, throttle), (Probe.THROUGHPUT, throughput))}
@@ -166,7 +173,7 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
             'samples': [{'age': now-at, 'mbps': rate, 'latency': latency, 'counted': 0 <= now-at <= max_age}
                         for at, rate, latency in sample.successes],
             'window': max_age, 'score': value,
-            'terms': None if terms is None else dict(zip(('mbps', 'latency', 'rate_factor', 'latency_factor'), terms)),
+            'terms': None if terms is None else dict(zip(('mbps', 'latency', 'rate_factor', 'latency_factor'), terms), cap=settings.rate_cap_mbps),
             'margin': margin, 'probes': probes, 'role': role,
             'flags': [f'active in {tag}' for tag in elsewhere] + [f'running {p}' for p in running] + ([f'requested {requested.value}'] if requested else [])
                      + ([f'confirm {sample.confirm.value}'] if sample.confirm else [])}
@@ -248,6 +255,10 @@ def render(page, now, wall):
         ('Managed selectors', e(', '.join(s['managed_selectors']) or '—')),
         ('Priorities', '<br>'.join(e(f'{t}: {tiers(x)}') for t, x in s['selector_priorities'].items()) or '—'),
         ('Provider weights', e(', '.join(f'{p} {w:g}' for p, w in s['provider_weights'].items()) or 'all 1')),
+        ('Throughput', e('skip {:g} MiB, stop at {:g} MiB scored or once {:g} MiB beat the cap; cap '.format(
+            *(s['throughput_mib'][i] for i in (0, 2, 1))) + f'{s["rate_cap_mbps"]:g} Mbps')),
+        ('Shortlist · rotation', e(', '.join(f'{p} {s["shortlist"][p]} · every {_dur(s["rotation"][p])}'
+                                             for p in s['shortlist']) or '—')),
         ('Probe URLs', '<br>'.join(e(u) for u in s['probe_urls']))]))
     out.append('<h2>Selectors</h2>')
     out.append(_table(['selector', 'owner', 'choice', 'resolved leaf', 'last decision'], [
@@ -260,7 +271,7 @@ def render(page, now, wall):
         if 'rows' in x:
             out.append(_selector(x))
     out.append('<h2>How decisions are made</h2><ul class=rules>'
-               f'<li>Score = weight × (min(median Mbps, {RATE_CAP_MBPS}) / 10)<sup>0.6</sup> × '
+               f'<li>Score = weight × (min(median Mbps, {s["rate_cap_mbps"]:g}) / 10)<sup>0.6</sup> × '
                '(200 / max(median latency ms, 20))<sup>0.4</sup>, over the last three throughput samples.</li>'
                f'<li>Samples count for {_dur(ACTIVE_SCORE_MAX_AGE)} on the current choice and {_dur(SCORE_MAX_AGE)} '
                'on standbys. Struck-through samples have aged out.</li>'
@@ -301,7 +312,7 @@ def _selector(x):
                           else 'no sample in ' + _dur(r['window']))
         else:
             score = _cell(f'<b>{e(_num(r["score"]))}</b>',
-                          f'{_num(t["mbps"], 1)} Mbps → cap {_num(min(t["mbps"], RATE_CAP_MBPS), 1)} → ^0.6 = {_num(t["rate_factor"])}',
+                          f'{_num(t["mbps"], 1)} Mbps → cap {_num(min(t["mbps"], t["cap"]), 1)} → ^0.6 = {_num(t["rate_factor"])}',
                           f'{_num(t["latency"], 0)} ms → ^0.4 = {_num(t["latency_factor"])}',
                           f'× weight {r["weight"]:g}, {_dur(r["window"])} window')
         m = r['margin']

@@ -3,23 +3,23 @@ from dataclasses import dataclass
 import statistics
 import math
 
-from .probes import Probe, RATE_CAP_MBPS
+from .probes import Probe
 from .samples import Health
 from .settings import HOLD, MARGIN, ACTIVE_SCORE_MAX_AGE, FRESH_SAMPLE_SECONDS, SCORE_MAX_AGE
 
 
-def score_terms(sample, now, max_age):
+def score_terms(sample, now, max_age, cap):
     """Median rate and latency of the last three samples in the window, and their factors."""
     recent = sample.scored(now, max_age)
     if not recent:
         return None
     rate = statistics.median(rate for rate, _ in recent[-3:])
     latency = statistics.median(latency for _, latency in recent[-3:])
-    return rate, latency, (min(rate, RATE_CAP_MBPS)/10)**.6, (200/max(latency, 20))**.4
+    return rate, latency, (min(rate, cap)/10)**.6, (200/max(latency, 20))**.4
 
 
-def score(sample, weight, now, max_age):
-    terms = score_terms(sample, now, max_age)
+def score(sample, weight, now, max_age, cap):
+    terms = score_terms(sample, now, max_age, cap)
     return None if terms is None else weight * terms[2] * terms[3]
 
 
@@ -58,7 +58,7 @@ class EligiblePool:
     def value(self, key, max_age=None):
         if max_age is None:
             max_age = SCORE_MAX_AGE
-        return score(self.samples[key], self.candidates[key].weight, self.now, max_age)
+        return score(self.samples[key], self.candidates[key].weight, self.now, max_age, self.settings.rate_cap_mbps)
 
     def rank(self, key, max_age=None):
         if max_age is None:

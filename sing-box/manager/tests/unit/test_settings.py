@@ -28,6 +28,9 @@ INVALID = [
       for urls in ('https://ya.ru/', ['http://ya.ru/'], [{}])),
     *({'dashboard_listen': address} for address in
       ('9090', 'host.lan:9090', '0.0.0.0:0', '[::1:9090', '::1:9090', ':9090', None, '127.0.0.1:19090')),
+    {'provider_shortlist_sizes': {'p': -1}}, {'provider_shortlist_sizes': {'p': 1.5}}, {'provider_shortlist_sizes': []},
+    {'provider_rotation_seconds': {'p': 0}}, {'provider_rotation_seconds': {'p': True}},
+    {'throughput_evidence_mib': 40}, {'throughput_max_mib': 95}, {'shortlist_size': 2.5},
 ]
 
 

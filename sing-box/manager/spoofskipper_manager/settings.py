@@ -12,7 +12,6 @@ from urllib.parse import urlsplit
 ACTIVE_SCORE_MAX_AGE = 7200
 SCORE_MAX_AGE = 172800  # standby scores used for ranking
 CHALLENGE_RETRY_SECONDS = 1800  # retry of a failed or stale challenger test
-SHORTLIST_SIZE = 3  # standbys per provider that get throughput tests
 FRESH_SAMPLE_SECONDS = 30
 INSPECT_SECONDS = 5
 UPLINK_FRESH_SECONDS = 30  # a working uplink check covers failures for this long
@@ -45,6 +44,14 @@ class Settings:
     probe_timeout: float = 15
     probe_stall_timeout: float = 2
     throughput_seconds: float = 4
+    # Throughput skips slow start, then stops at the max or once evidence bytes beat the scored cap.
+    rate_cap_mbps: float = 150
+    throughput_skip_mib: float = 4
+    throughput_evidence_mib: float = 16
+    throughput_max_mib: float = 32
+    shortlist_size: int = 3  # best-scored standbys per provider that get throughput tests
+    provider_shortlist_sizes: Mapping[str, int] = field(default_factory=dict)
+    provider_rotation_seconds: Mapping[str, float] = field(default_factory=dict)
     probe_workers: int = 4
     probe_port: int = 19090
     clash_api_port: int = 19089
@@ -61,7 +68,8 @@ class Settings:
         object.__setattr__(self, 'managed_selectors', tuple(self.managed_selectors))
         object.__setattr__(self, 'probe_urls', tuple(self.probe_urls))
         object.__setattr__(self, 'uplink_urls', tuple(self.uplink_urls))
-        object.__setattr__(self, 'provider_weights', MappingProxyType(dict(self.provider_weights)))
+        for name in ('provider_weights', 'provider_shortlist_sizes', 'provider_rotation_seconds'):
+            object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
         object.__setattr__(self, 'selector_priorities', MappingProxyType({
             tag: tuple(tuple(tier) for tier in tiers)
             for tag, tiers in self.selector_priorities.items()}))
@@ -74,6 +82,17 @@ class Settings:
 
     def with_changes(self, **changes):
         return replace(self, **changes)
+
+    def shortlist_for(self, provider):
+        return self.provider_shortlist_sizes.get(provider, self.shortlist_size)
+
+    def rotation_for(self, provider):
+        return self.provider_rotation_seconds.get(provider, self.throughput_rotation_seconds)
+
+    def throughput_bytes(self):
+        """Skipped, early-stop evidence and scored maximum byte counts."""
+        return tuple(int(mib * 1024 * 1024) for mib in (
+            self.throughput_skip_mib, self.throughput_evidence_mib, self.throughput_max_mib))
 
     def as_dict(self):
         return {field.name: getattr(self, field.name) for field in fields(self)}
@@ -110,17 +129,27 @@ def load_settings(config_dir):
     if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
             or not math.isfinite(w) or w <= 0 for w in weights.values()):
         raise ValueError('provider weights must be positive finite numbers')
+    sizes, rotations = settings.get('provider_shortlist_sizes', {}), settings.get('provider_rotation_seconds', {})
+    if not isinstance(sizes, dict) or any(not isinstance(n, int) or isinstance(n, bool) or n < 0 for n in sizes.values()):
+        raise ValueError('provider shortlist sizes must be non-negative integers')
+    if not isinstance(rotations, dict) or any(not isinstance(v, (int, float)) or isinstance(v, bool)
+            or not math.isfinite(v) or v <= 0 for v in rotations.values()):
+        raise ValueError('provider rotation intervals must be positive finite numbers')
     for key, default in _NUMERIC_DEFAULTS.items():
         value = settings.setdefault(key, default)
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0:
             raise ValueError('invalid manager deadline/cadence')
-    for key, maximum in (('probe_workers', 4), ('probe_port', 65535), ('clash_api_port', 65535)):
+    for key, maximum in (('probe_workers', 4), ('probe_port', 65535), ('clash_api_port', 65535), ('shortlist_size', 1000)):
         if not isinstance(settings[key], int) or settings[key] > maximum:
             raise ValueError('invalid probe worker count/port')
     if settings['probe_port'] == settings['clash_api_port']:
         raise ValueError('probe_port and clash_api_port must differ')
     if settings['probe_timeout'] > 15 or settings['throughput_seconds'] > 4:
         raise ValueError('probe deadlines exceed bounded maximum')
+    # Cloudflare refuses requests of 100 MiB; the fallback file is exactly 100 MiB.
+    if (settings['throughput_evidence_mib'] > settings['throughput_max_mib'] or settings['throughput_max_mib'] < 1
+            or settings['throughput_skip_mib'] + settings['throughput_max_mib'] > 96):
+        raise ValueError('throughput byte budget must satisfy evidence <= max, max >= 1 and skip + max <= 96 MiB')
     urls = settings.get('probe_urls', list(DEFAULT_PROBE_URLS))
     uplinks = settings.get('uplink_urls', list(DEFAULT_UPLINK_URLS))
     for name, value, minimum in (('probe_urls', urls, 1), ('uplink_urls', uplinks, 0)):

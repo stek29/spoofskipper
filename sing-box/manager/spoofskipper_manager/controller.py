@@ -65,7 +65,8 @@ class SelectorController:
                 if key:
                     sample = measurements.samples[key]
                     compared.append({'candidate': tag, 'score': score(sample, measurements.candidates[key].weight, now,
-                        ACTIVE_SCORE_MAX_AGE if tag == measurements.active[selector] else SCORE_MAX_AGE),
+                        ACTIVE_SCORE_MAX_AGE if tag == measurements.active[selector] else SCORE_MAX_AGE,
+                        measurements.settings.rate_cap_mbps),
                         'sample_age': now-sample.throughput_at if sample.successes else None})
             signature = (decision.reason, target, pending)
             if self.last_decisions.get(selector) != signature:

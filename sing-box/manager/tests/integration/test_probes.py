@@ -15,7 +15,11 @@ from urllib.parse import parse_qs, urlsplit
 
 from test_lifecycle import free_port, wait_for, FIXTURES
 from spoofskipper_manager import compiler, clash_api
-from spoofskipper_manager.probes import ProbeClient, THROTTLE, SKIP, TOTAL, SCORED_MAX
+from spoofskipper_manager.probes import ProbeClient, THROTTLE
+from spoofskipper_manager.settings import Settings
+
+SKIP, _, SCORED_MAX = Settings().throughput_bytes()
+TOTAL = SKIP + SCORED_MAX
 
 
 @unittest.skipUnless(shutil.which('sing-box'), 'requires offline Compose pinned core')

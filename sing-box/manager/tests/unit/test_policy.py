@@ -9,7 +9,8 @@ from spoofskipper_manager import clash_api
 from spoofskipper_manager.identity import Candidate, SampleKey
 from spoofskipper_manager.policy import Policy, score
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
-from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult
+from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
+SKIP = 4 * 1024 * 1024
 from spoofskipper_manager.settings import SCORE_MAX_AGE, Settings
 
 
@@ -38,15 +39,15 @@ class PolicyTests(unittest.TestCase):
         s = self.sample('a')
         s.successes = [(100, 1, 1000), (900, 10, 50), (950, 100, 50), (999, 20, 50)]
         expected = 1.25 * 2**.6 * 4**.4
-        self.assertAlmostEqual(score(s, 1.25, 1000, 200), expected)
+        self.assertAlmostEqual(score(s, 1.25, 1000, 200, 100), expected)
         s.successes = [(1000, 200, 50)]
-        capped = score(s, 1, 1000, 7200)
+        capped = score(s, 1, 1000, 7200, 100)
         s.successes = [(1000, 100, 50)]
-        self.assertEqual(score(s, 1, 1000, 7200), capped)
-        self.assertIsNone(score(s, 1, 8201, 7200))
-        self.assertIsNotNone(score(s, 1, 8201, SCORE_MAX_AGE))
+        self.assertEqual(score(s, 1, 1000, 7200, 100), capped)
+        self.assertIsNone(score(s, 1, 8201, 7200, 100))
+        self.assertIsNotNone(score(s, 1, 8201, SCORE_MAX_AGE, 100))
         s.health = Health.FAILED
-        self.assertIsNone(score(s, 1, 1000, 7200))
+        self.assertIsNone(score(s, 1, 1000, 7200, 100))
 
     def test_elective_switch_needs_margin_hold_and_fresh_throughput(self):
         self.sample('b').successes = [(1000, 11, 50)]  # Within the 15% margin.

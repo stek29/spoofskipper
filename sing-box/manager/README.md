@@ -44,8 +44,15 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `gate_standby_seconds` | 480 | Standby-path gate interval |
 | `throttle_seconds` | 300 | Active-path threshold check interval |
 | `throughput_active_seconds` | 3600 | Active throughput interval |
-| `throughput_shortlist_seconds` | 21600 | Throughput interval for the 3 best-scored healthy standbys per provider |
+| `throughput_shortlist_seconds` | 21600 | Throughput interval for each provider's shortlist of best-scored healthy standbys |
 | `throughput_rotation_seconds` | 14400 | Interval of one extra throughput test per provider on its least recently tested other standby |
+| `shortlist_size` | 3 | Shortlisted standbys per provider, integer |
+| `provider_shortlist_sizes` | `{}` | Shortlist size by provider, non-negative integer; omitted providers use `shortlist_size` |
+| `provider_rotation_seconds` | `{}` | Rotation interval by provider; omitted providers use `throughput_rotation_seconds` |
+| `rate_cap_mbps` | 150 | Throughput above this scores the same |
+| `throughput_skip_mib` | 4 | Unscored prefix of a throughput read (TCP slow start) |
+| `throughput_evidence_mib` | 16 | Scored MiB after which a rate above the cap ends the read, at most `throughput_max_mib` |
+| `throughput_max_mib` | 32 | Scored MiB after which a read ends; skip plus max at most 96 (Cloudflare refuses 100 MiB) |
 | `probe_workers` | 4 | Concurrent gates, integer 1–4; body checks/downloads are serial |
 | `probe_port` | 19090 | Loopback mixed inbound port, integer 1–65535 |
 | `clash_api_port` | 19089 | Loopback Clash API port added when the config has no `external_controller` |
@@ -81,13 +88,13 @@ before a local proxy. Providers outside an explicit tier list are excluded.
 
 Every probe is one HTTPS request through the path, differing only in size. A URL
 with a `{bytes}` placeholder is asked for exactly that many bytes; a URL without
-one must be a static file of at least 9 MiB, read with a `Range` request.
+one must be a static file of at least skip plus max MiB (36 by default), read with a `Range` request.
 
 | Probe | Body | Proves |
 |---|---|---|
 | `gate` | 1 byte | Reachability and latency |
 | `throttle` | 256 KiB | The connection keeps working past the throttling threshold |
-| `throughput` | up to 9 MiB | Rate after the first 1 MiB; also passes the threshold |
+| `throughput` | up to 36 MiB | Rate after the first 4 MiB; also passes the threshold |
 
 A path is healthy only after a `throttle` or `throughput` probe reads past 256 KiB.
 Gates keep proven health fresh but cannot make an unknown or failed path healthy,
@@ -116,7 +123,7 @@ All-path failure keeps the current route and never adds direct routing.
 
 The five-minute elective hold and 15% improvement margin are fixed policy rules,
 not configurable cadences. Scores use the last three successful throughput/latency
-samples, capped at 100 Mbps and weighted by provider. Active scores expire after
+samples, capped at `rate_cap_mbps` and weighted by provider. Active scores expire after
 two hours, standby scores after two days. Every elective switch, including a
 switch requires a `throughput` result taken after the hold and no older than 30
 seconds. A return to a higher tier skips the margin and accepts any fresh proof
@@ -125,20 +132,21 @@ retried after 30 minutes. Attempts cancelled by a reload or selector write can b
 retried immediately; upstream-change and worker-error discards retain their
 normal scheduling timestamps.
 
-Throughput runs on active paths and on the three best-scored healthy standbys of
-each provider (unscored ones by latency). Every four hours, one more standby per
-provider, the least recently tested, gets a throughput test, so every healthy
-path is eventually scored and can enter the shortlist. It skips 1 MiB (TCP slow start), then reads for at
-most four seconds after the response headers, stopping early at 8 MiB scored or
-once 4 MiB show a rate above 100 Mbps. Native URLTest checks remain independently active.
+Throughput runs on active paths and on each provider's shortlist, its three best-scored
+healthy standbys by default (unscored ones by latency). Every four hours by default, one
+more standby per provider, the least recently tested, gets a throughput test, so every
+healthy path is eventually scored and can enter the shortlist. A provider with many paths
+needs a shorter rotation for all of them to stay within the two-day score window. A read
+skips 4 MiB (TCP slow start), then reads for at most four seconds after the response
+headers, stopping early at 32 MiB scored or once 16 MiB show a rate above the cap. Native URLTest checks remain independently active.
 
 Approximate probe traffic with default cadences, for fast paths:
 
 | Source | Volume |
 |---|---|
-| Each active path | up to about 290 MiB/day (throttle every 5 min, throughput hourly, at most 9 MiB each) |
-| Each provider's 3 shortlisted standbys | up to about 108 MiB/day together |
-| Each provider's rotation | up to about 54 MiB/day |
+| Each active path | up to about 940 MiB/day (throttle every 5 min, throughput hourly, at most 36 MiB each) |
+| Each provider's 3 shortlisted standbys | up to about 430 MiB/day together |
+| Each provider's rotation | up to about 216 MiB/day (every 30 minutes: about 1.7 GiB/day) |
 | Gates | a TLS handshake each: every minute (active) or 8 minutes (standby) |
 | Failed paths that still answer gates | one `throttle` attempt per gate; throttled paths usually stall within tens of KiB |
 

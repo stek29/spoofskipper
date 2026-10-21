@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import compiler
-from spoofskipper_manager.probes import SKIP, THROTTLE, Probe, ProbeResult
+from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
+SKIP = 4 * 1024 * 1024
 from spoofskipper_manager.identity import UPLINK, sample_key
 from spoofskipper_manager.scheduler import Health, Scheduler
 from spoofskipper_manager.policy import score
@@ -106,6 +107,17 @@ class SchedulingTests(unittest.TestCase):
         samples['c1'].last['throughput'] = self.now
         self.assertEqual([k.tag for k in self.scheduler.rotation(shortlisted, self.now + 14400)], ['c2'])
 
+    def test_shortlist_size_and_rotation_interval_are_per_provider(self):
+        for i, sample in enumerate(self.scheduler.samples.values()):
+            sample.health, sample.healthy_at, sample.latency = Health.HEALTHY, self.now, 10+i
+        self.scheduler.settings = self.scheduler.settings.with_changes(
+            provider_shortlist_sizes={'p': 5}, provider_rotation_seconds={'p': 60})
+        shortlisted = self.scheduler.shortlist(self.now)
+        self.assertEqual(len(shortlisted), 5)
+        self.scheduler.rotated_at['p'] = self.now - 59
+        self.assertEqual(self.scheduler.rotation(shortlisted, self.now), {})
+        self.assertEqual(len(self.scheduler.rotation(shortlisted, self.now + 1)), 1)
+
     def test_failures_wait_for_the_uplink_and_are_dropped_while_it_is_down(self):
         key = next(iter(self.scheduler.samples))
         sample = self.scheduler.samples[key]
@@ -154,7 +166,7 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(sample.confirm, Probe.THROTTLE)  # The third endpoint is tried next.
         self.scheduler.accept(key, ProbeResult(Probe.THROTTLE, error='TimeoutError'), self.now)
         self.assertFalse(sample.healthy)
-        self.assertIsNone(score(sample, 1, self.now, 7200))
+        self.assertIsNone(score(sample, 1, self.now, 7200, 100))
 
     def test_failed_path_rechecks_threshold_once_per_gate_success(self):
         key = next(iter(self.scheduler.samples))

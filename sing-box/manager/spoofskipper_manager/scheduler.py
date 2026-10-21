@@ -9,7 +9,7 @@ from .identity import Candidate, sample_key
 from .probes import Probe, ProbeClient
 from .samples import FAILURES_TO_FAIL, Health, Sample
 from .policy import score
-from .settings import (Settings, INSPECT_SECONDS, SCORE_MAX_AGE, SHORTLIST_SIZE,
+from .settings import (Settings, INSPECT_SECONDS, SCORE_MAX_AGE,
                        UPLINK_FRESH_SECONDS, UPLINK_RETRY_SECONDS)
 
 
@@ -136,16 +136,17 @@ class Scheduler:
         """The best-scored healthy standbys of each provider get regular throughput tests."""
         now = self.clock() if now is None else now
         def rank(key):
-            value = score(self.samples[key], self.candidates[key].weight, now, SCORE_MAX_AGE)
+            value = score(self.samples[key], self.candidates[key].weight, now, SCORE_MAX_AGE, self.settings.rate_cap_mbps)
             return value is None, -(value or 0), self.samples[key].latency_or_inf
-        return {key for keys in self.standbys().values() for key in sorted(keys, key=rank)[:SHORTLIST_SIZE]}
+        return {key for provider, keys in self.standbys().items()
+                for key in sorted(keys, key=rank)[:self.settings.shortlist_for(provider)]}
 
     def rotation(self, shortlisted, now):
         """One more standby per provider and interval, least recently tested first, so every path gets scored."""
         chosen = {}
         for provider, keys in self.standbys().items():
             rest = [key for key in keys if key not in shortlisted]
-            if rest and now - self.rotated_at.get(provider, float('-inf')) >= self.settings.throughput_rotation_seconds:
+            if rest and now - self.rotated_at.get(provider, float('-inf')) >= self.settings.rotation_for(provider):
                 sample = lambda key: self.samples[key]
                 key = min(rest, key=lambda k: (sample(k).last.get(Probe.THROUGHPUT, float('-inf')), sample(k).latency_or_inf))
                 chosen[key] = provider
