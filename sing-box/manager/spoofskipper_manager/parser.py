@@ -5,6 +5,7 @@ Keep this module free of manager imports: sing-subs loads it directly.
 from __future__ import annotations
 
 import base64
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -546,6 +547,32 @@ def apply_outbound_settings(
         "outbounds": configured_outbounds,
         "groups": output.get("groups", {}),
     }
+
+
+# uTLS presets a Reality server accepts (TLS 1.3 with an X25519 share); android and 360 lack it.
+POOL_FINGERPRINTS = ("chrome", "firefox", "edge", "safari", "ios", "qq", "random", "randomized")
+
+
+def read_fingerprints(config: dict[str, Any]) -> tuple[str, ...]:
+    pool = validate_mapping(config.get("outbound_settings"), "outbound_settings").get("fingerprints", [])
+    if (not isinstance(pool, list) or len(set(pool)) != len(pool)
+            or any(not isinstance(fp, str) or fp not in POOL_FINGERPRINTS for fp in pool)):
+        raise ValueError(f"outbound_settings.fingerprints must be distinct values of {', '.join(POOL_FINGERPRINTS)}")
+    return tuple(pool)
+
+
+def assign_fingerprints(output: dict[str, Any], pool: tuple[str, ...]) -> dict[str, Any]:
+    """Spread the pool over TLS outbounds by a hash of the tag, stable across refreshes; overrides link fp."""
+    if not pool:
+        return output
+    outbounds = []
+    for outbound in output.get("outbounds", []):
+        tls = outbound.get("tls")
+        if isinstance(tls, dict) and tls.get("enabled"):
+            index = int.from_bytes(hashlib.sha256(str(outbound.get("tag", "")).encode()).digest()[:4], "big") % len(pool)
+            outbound = {**outbound, "tls": {**tls, "utls": {"enabled": True, "fingerprint": pool[index]}}}
+        outbounds.append(outbound)
+    return {**output, "outbounds": outbounds}
 
 
 def read_outbound_settings(config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:

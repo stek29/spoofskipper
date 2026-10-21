@@ -3,7 +3,8 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from .parser import apply_outbound_settings, merge_outputs, read_outbound_settings, render_subscription
+from .parser import (apply_outbound_settings, assign_fingerprints, merge_outputs, read_fingerprints,
+                     read_outbound_settings, render_subscription)
 from .settings import Settings
 from .state import write_json
 
@@ -18,6 +19,7 @@ def read_specs(config_dir):
         raise ValueError('subscriptions must be a list of objects')
     for spec in specs:
         spec.setdefault('prefix', '')  # The sing-subs default.
+    read_fingerprints(config)
     prefixes = [spec['prefix'] for spec in specs]
     if any(not isinstance(p, str) for p in prefixes) or len(set(prefixes)) != len(prefixes):
         raise ValueError('provider prefixes must be unique')
@@ -48,10 +50,12 @@ class Providers:
         """Fetch every provider; between() runs after each so probing and failover continue."""
         pending = dict(self.snapshots)
         global_settings, type_settings = read_outbound_settings(self.config)
+        fingerprints = read_fingerprints(self.config)
         for spec in self.config['subscriptions']:
             prefix = spec['prefix']
             try:
-                output = apply_outbound_settings(render_subscription(spec, self.log), global_settings, type_settings)
+                output = assign_fingerprints(apply_outbound_settings(render_subscription(spec, self.log), global_settings,
+                                                                     type_settings), fingerprints)
                 if not output['outbounds']:
                     raise ValueError('empty provider')
                 pending[prefix] = {'provider': prefix, 'fetched_at': time.time(), 'output': output}

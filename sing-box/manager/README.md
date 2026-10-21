@@ -10,6 +10,13 @@ and optional `local-subs-config.json` and `local-manager.json`. The manager rend
 a scratch copy of `/config` in which the merged subscriptions replace
 `local-subs.json`, so `config.jsonnet` keeps importing it unchanged. Without
 `local-subs-config.json` there are no providers and `/config` renders as is.
+`outbound_settings.fingerprints` in `local-subs-config.json`, for example
+`["chrome", "firefox", "safari", "randomized"]`, overrides each TLS outbound's uTLS
+fingerprint with one pool entry chosen by a hash of its tag, so the pool is spread
+over every provider's paths and stays stable across refreshes. Only presets a Reality
+server accepts are allowed: `chrome`, `firefox`, `edge`, `safari`, `ios`, `qq`,
+`random` and `randomized` (`android` and `360` lack TLS 1.3 with X25519). Changing
+the pool takes effect at the next refresh and resets the affected paths' samples.
 State under `/data` contains live/previous JSON, an activation marker, and
 provider snapshots. Keep private inputs out of version control.
 

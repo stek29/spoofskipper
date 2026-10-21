@@ -111,6 +111,22 @@ class SubscriptionTests(unittest.TestCase):
         with patch.object(parser.urllib.request, 'urlopen', return_value=Response([b' ok\n'])):
             self.assertEqual(parser.fetch_url('https://invalid.test/'), 'ok')
 
+    def test_fingerprint_pool_is_spread_by_tag_and_overrides_links(self):
+        tls = {'enabled': True, 'utls': {'enabled': True, 'fingerprint': 'firefox'}}
+        output = {'outbounds': [{'type': 'vless', 'tag': f'a_{i}', 'tls': tls} for i in range(40)]
+                  + [{'type': 'shadowsocks', 'tag': 'a_ss'}], 'groups': {}}
+        pool = ('chrome', 'safari', 'randomized')
+        first = parser.assign_fingerprints(output, pool)
+        self.assertEqual(first, parser.assign_fingerprints(output, pool))  # Stable across refreshes.
+        used = [o['tls']['utls']['fingerprint'] for o in first['outbounds'][:-1]]
+        self.assertEqual(set(used), set(pool))
+        self.assertNotIn('tls', first['outbounds'][-1])
+        self.assertEqual(tls['utls']['fingerprint'], 'firefox')  # Input is not mutated.
+        self.assertEqual(parser.assign_fingerprints(output, ()), output)
+        for pool in (['android'], ['360'], ['chrome', 'chrome'], 'chrome', [1]):
+            with self.assertRaises(ValueError):
+                parser.read_fingerprints({'outbound_settings': {'fingerprints': pool}})
+
     def test_conflict_and_unique_prefix(self):
         with self.assertRaises(ValueError):
             parser.merge_outputs([{'outbounds': [{'tag': 'a', 'type': 'direct'}]},
