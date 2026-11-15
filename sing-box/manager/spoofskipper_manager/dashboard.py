@@ -44,6 +44,20 @@ def _public(url):
     return parts._replace(netloc=parts.netloc.rpartition('@')[2], fragment='').geturl()
 
 
+def _detour(scheduler, tag):
+    """Resolve detour selectors from the latest inspection, exposing only tags."""
+    graph = scheduler.graph
+    upstream = graph.entries.get(tag, {}).get('detour') if graph is not None else None
+    if not upstream:
+        return None
+    try:
+        path = graph.fold(upstream, lambda entry, children: [entry['tag']] +
+                          [tag for child in children for tag in child], choices=scheduler.proxy_choices)
+    except ValueError:
+        path = [upstream, 'unknown']
+    return 'via ' + ' → '.join(path)
+
+
 def snapshot(scheduler, config, now, wall=None):
     """Copy what the page shows into fresh plain values; called on the main loop only.
 
@@ -78,6 +92,7 @@ def snapshot(scheduler, config, now, wall=None):
         choice = scheduler.proxy_choices.get(tag, {}).get('now')
         entry = {'tag': tag, 'managed': tag in settings.managed_selectors,
                  'now': None if choice is None else str(choice), 'leaf': scheduler.active.get(tag)}
+        entry['via'] = _detour(scheduler, entry['leaf'] or entry['now'])
         if entry['managed'] and tag in scheduler.active and scheduler.graph is not None:
             entry.update(_managed(scheduler, tag, now, shortlisted))
         page['selectors'].append(entry)
@@ -166,7 +181,8 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
                   'passes': value is not None and (incumbent is None or value >= incumbent*MARGIN)}
     running = [probe.value for k, probe, _ in scheduler.jobs.values() if k == key]
     requested = scheduler.requested.get(key)
-    return {'tag': key.tag, 'provider': candidate.provider, 'tier': tier, 'weight': candidate.weight,
+    return {'tag': key.tag, 'via': _detour(scheduler, key.tag),
+            'provider': candidate.provider, 'tier': tier, 'weight': candidate.weight,
             'current': current, 'health': sample.health.value, 'failures': sample.failures,
             'failed_probe': sample.failed_probe.value if sample.failed_probe else None,
             'healthy_age': _age(now, sample.healthy_at), 'latency': sample.latency, 'eligibility': eligibility,
@@ -263,7 +279,7 @@ def render(page, now, wall):
     out.append('<h2>Selectors</h2>')
     out.append(_table(['selector', 'owner', 'choice', 'resolved leaf', 'last decision'], [
         [e(x['tag']), _tone('manager') if x['managed'] else _tone('native'),
-         e(x['now'] or 'unknown'), e(x['leaf'] or 'unknown'),
+         e(x['now'] or 'unknown'), _cell(e(x['leaf'] or 'unknown'), *([x['via']] if x.get('via') else [])),
          _cell(_tone(x['decision']['reason'], REASON_TONES.get(x['decision']['reason'])),
                _ago(x['decision']['age'])) if x.get('decision') else '—']
         for x in page['selectors']]))
@@ -338,7 +354,7 @@ def _selector(x):
                          + f' · next {e(_due(p["due_in"]))}</span></div>'
                          for name, p in r['probes'].items())
         classes.append('cur' if r['current'] else 'off' if r['tier'] == 'excluded' or r['health'] == 'failed' else None)
-        rows.append([e(i), _cell(e(r['tag']), r['provider']),
+        rows.append([e(i), _cell(e(r['tag']), r['provider'], *([r['via']] if r.get('via') else [])),
                      e('—' if r['tier'] is None else r['tier']), e(f'{r["weight"]:g}'), health, eligibility,
                      samples, score, margin, probes, _cell(e(r['role'] or ('' if r['flags'] else '—')), *r['flags'])])
     return (f'<h2>{e(x["tag"])}</h2>' + _kv(pairs)

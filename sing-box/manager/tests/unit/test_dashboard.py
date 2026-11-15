@@ -86,6 +86,27 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('42.2 Mbps', body)
         self.assertIn('failed (timeout)', body)
 
+    def test_detours_resolve_nested_paths_and_follow_live_choices(self):
+        graph = self.scheduler.graph
+        graph.entries['a']['detour'] = 'relay'
+        graph.entries['relay'] = {'type': 'socks', 'tag': 'relay', 'detour': 'native',
+                                  'server': 'relay-secret.example', 'password': 'relay-secret'}
+        graph.entries['native']['outbounds'] = ['b', EVIL]
+        self.scheduler.active['deep'] = 'a'
+        self.scheduler.proxy_choices['deep']['now'] = 'a'
+        for choice in ('b', EVIL, 'missing'):
+            self.scheduler.proxy_choices['native']['now'] = choice
+            page = snapshot(self.scheduler, self.config, self.now, wall=0)
+            deep = next(s for s in page['selectors'] if s['tag'] == 'deep')
+            row = next(r for r in deep['rows'] if r['tag'] == 'a')
+            expected = 'via relay → unknown' if choice == 'missing' else 'via relay → native → ' + choice
+            self.assertEqual(row['via'], expected)
+            self.assertEqual(deep['via'], expected)
+            body = render(page, self.now, 0)
+            self.assertIn(expected.replace(EVIL, '&lt;script&gt;x&lt;/script&gt;'), body)
+            self.assertNotIn(EVIL, body)
+            self.assertNotIn('relay-secret', body)
+
 
 if __name__ == '__main__':
     unittest.main()
