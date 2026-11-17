@@ -273,8 +273,8 @@ def render(page, now, wall):
         ('Provider weights', e(', '.join(f'{p} {w:g}' for p, w in s['provider_weights'].items()) or 'all 1')),
         ('Throughput', e('skip {:g} MiB, stop at {:g} MiB scored or once {:g} MiB beat the cap; cap '.format(
             *(s['throughput_mib'][i] for i in (0, 2, 1))) + f'{s["rate_cap_mbps"]:g} Mbps')),
-        ('Shortlist · rotation', e(', '.join(f'{p} {s["shortlist"][p]} · every {_dur(s["rotation"][p])}'
-                                             for p in s['shortlist']) or '—')),
+        ('Shortlist · rotation', '<br>'.join(e(f'{p} {s["shortlist"][p]} · every {_dur(s["rotation"][p])}')
+                                             for p in s['shortlist']) or '—'),
         ('Probe URLs', '<br>'.join(e(u) for u in s['probe_urls']))]))
     out.append('<h2>Selectors</h2>')
     out.append(_table(['selector', 'owner', 'choice', 'resolved leaf', 'last decision'], [
