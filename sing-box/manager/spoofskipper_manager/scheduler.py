@@ -9,12 +9,13 @@ from .identity import Candidate, sample_key
 from .probes import Probe, ProbeClient
 from .samples import FAILURES_TO_FAIL, Health, Sample
 from .policy import score
+from .measurements import Measurements
 from .settings import (Settings, INSPECT_SECONDS, SCORE_MAX_AGE,
                        UPLINK_FRESH_SECONDS, UPLINK_RETRY_SECONDS)
 
 
 class Scheduler:
-    def __init__(self, log, clock=time.monotonic):
+    def __init__(self, log, clock=time.monotonic, state_path=None, wall=time.time):
         self.log, self.clock = log, clock
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix='probe')  # 4 gates, a download, an uplink check
         self.samples, self.candidates, self.jobs = {}, {}, {}
@@ -29,6 +30,9 @@ class Scheduler:
         self.configured = None
         self.graph, self.members = None, {}
         self.rotated_at = {}
+        self.store = Measurements(state_path, log, clock, wall) if state_path is not None else None
+        if self.store:
+            self.rotated_at.update(self.store.rotation)
         # Failures wait for a direct uplink check; while it is down they are dropped.
         self.held, self.uplink, self.uplink_down, self.uplink_checked_at = [], None, False, float('-inf')
 
@@ -76,6 +80,7 @@ class Scheduler:
 
     def update_paths(self, proxies):
         paths = {}
+        restored = 0
         for key in self.candidates:
             try:
                 path = self.graph.path_identity(key.tag, proxies)
@@ -85,8 +90,15 @@ class Scheduler:
                 self.samples[key] = Sample()
                 self.path_versions[key] = self.path_versions.get(key, 0) + 1
             paths[key] = path
+            if self.store:
+                sample = self.store.restore(key, path)
+                if sample is not None:
+                    self.samples[key] = sample
+                    restored += 1
         self.paths = paths
         self.path_versions = {k: self.path_versions.get(k, 0) for k in paths}
+        if restored:
+            self.log('measurement_state_restored', candidates=restored)
 
     def selector_members(self, selector):
         if selector not in self.members:
@@ -120,10 +132,17 @@ class Scheduler:
         self.clients.add(self.client)
 
     def close(self):
+        self.collect(self.clock())
+        # Checkpoint before cancelling so interrupted attempts can be rearmed.
+        self.checkpoint(force=True)
         self.invalidate()
         for client in self.clients:
             client.cancel()
         self.pool.shutdown(wait=True, cancel_futures=True)
+
+    def checkpoint(self, force=False):
+        if self.store:
+            self.store.save(self, force)
 
     def standbys(self):
         groups = {}

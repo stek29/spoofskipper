@@ -49,7 +49,7 @@ class Manager:
         self.stopping = None
         self.reload_requested = False
         self.current = None
-        self.scheduler = Scheduler(log)
+        self.scheduler = Scheduler(log, state_path=self.root / 'measurements.json')
         self.scheduler_errors = {}
         self.dashboard = Dashboard(log)
 
@@ -268,6 +268,7 @@ class Manager:
                 last_logged = now
             self.scheduler_errors[error] = count, last_logged
         # Snapshots are built here, between ticks, so the page never reads live state.
+        self.scheduler.checkpoint()
         self.dashboard.refresh(self.scheduler, self.current)
 
     def start_saved(self):

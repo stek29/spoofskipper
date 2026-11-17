@@ -20,6 +20,14 @@ the pool takes effect at the next refresh and resets the affected paths' samples
 State under `/data` contains live/previous JSON, an activation marker, and
 provider snapshots. Keep private inputs out of version control.
 
+Measurement history, health evidence, probe outcomes/cadences and provider rotation
+times are saved atomically in `/data/measurements.json` every 30 seconds and on
+clean shutdown. Restarts restore evidence only for matching outbound definitions
+and the same resolved upstream path. Downtime still counts toward freshness;
+interrupted probes are retried, never treated as completed. An unreadable or
+invalid checkpoint starts fresh without blocking routing. Checkpoints contain
+tags and definition/path hashes, not proxy credentials or subscription URLs.
+
 `ZAPRET_PRERUN` is an optional shell hook before manager startup. `CONFIG_TMPL`
 is no longer supported; use `/config/sing.jsonnet` or the CLI `--config-dir`.
 Keep Compose's stop grace period greater than `shutdown_timeout`.
@@ -254,6 +262,8 @@ Core/Jsonnet error output is suppressed in logs to protect secrets.
 | `interrupted_activation_restored` | Interrupted activation recovered from previous JSON |
 | `settings_invalid`, `cached_render_failed`, `refresh_failed` | Settings/render/fetch problem; saved state may still serve traffic |
 | `provider_refreshed`, `provider_refresh_failed` | Per-provider refresh result; failed providers retain last-good snapshots |
+| `measurement_state_restored` | Matching candidates recovered their measurement history after restart |
+| `measurement_state_invalid`, `measurement_state_write_failed` | Checkpoint could not be read/written; routing and measurements continue |
 | `bootstrap_waiting_for_providers` | No usable provider snapshot yet; retrying |
 | `bootstrap_completed`, `bootstrap_failed` | One-shot `bootstrap` seeded every provider, or wrote nothing (`missing` lists providers) |
 | `probe_sample`, `probe_failed`, `probe_discarded` | Measurement result, failure or invalidated result |
