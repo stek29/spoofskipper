@@ -3,7 +3,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from .parser import (apply_outbound_settings, assign_fingerprints, merge_outputs, read_fingerprints,
+from .parser import (apply_outbound_settings, assign_fingerprints, merge_outputs, read_fingerprints, read_headers,
                      read_outbound_settings, render_subscription)
 from .settings import Settings
 from .state import write_json
@@ -19,6 +19,7 @@ def read_specs(config_dir):
         raise ValueError('subscriptions must be a list of objects')
     for spec in specs:
         spec.setdefault('prefix', '')  # The sing-subs default.
+        read_headers(spec.get('headers'))
     read_fingerprints(config)
     prefixes = [spec['prefix'] for spec in specs]
     if any(not isinstance(p, str) for p in prefixes) or len(set(prefixes)) != len(prefixes):

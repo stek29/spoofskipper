@@ -111,6 +111,51 @@ class SubscriptionTests(unittest.TestCase):
         with patch.object(parser.urllib.request, 'urlopen', return_value=Response([b' ok\n'])):
             self.assertEqual(parser.fetch_url('https://invalid.test/'), 'ok')
 
+    def test_provider_headers_reach_http_request_and_stay_provider_specific(self):
+        import http.server, threading
+        received = []
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                received.append(dict(self.headers))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'trojan://s@localhost:443#one')
+            def log_message(self, *_):
+                pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        spec = {'url': f'http://127.0.0.1:{server.server_port}/',
+                'headers': {'user-agent': 'ExampleClient/1.0', 'X-Hwid': 'fixture-device-123'}}
+        self.assertEqual(len(parser.render_subscription(spec)['outbounds']), 1)
+        parser.render_subscription({'url': spec['url']})
+        self.assertEqual(received[0]['User-Agent'], 'ExampleClient/1.0')
+        self.assertEqual(received[0]['X-Hwid'], 'fixture-device-123')
+        self.assertEqual(received[1]['User-Agent'], 'spoofskipper/sing-box')
+        self.assertNotIn('X-Hwid', received[1])
+
+    def test_invalid_headers_are_rejected_without_values_in_errors(self):
+        for headers in ([], {'bad\nname': 'private'}, {'x-hwid': 'private\r\ninjected: yes'},
+                        {'x-hwid': 42}, {'User-Agent': 'a', 'user-agent': 'b'}):
+            self.specs['subscriptions'][0]['headers'] = headers
+            (self.config / 'local-subs-config.json').write_text(json.dumps(self.specs))
+            with self.assertRaises(ValueError) as caught:
+                self.providers()
+            self.assertNotIn('private', str(caught.exception))
+
+    def test_hwid_rejection_retains_snapshot_without_logging_headers(self):
+        p = self.providers()
+        with patch.object(parser, 'fetch_url', return_value='trojan://s@localhost:443#one'):
+            p.commit(p.refresh())
+        for header in ('x-hwid-not-supported', 'x-hwid-max-devices-reached', 'x-hwid-limit'):
+            response = unittest.mock.MagicMock()
+            response.__enter__.return_value = response
+            response.headers = {header: 'true'}
+            with patch.object(parser.urllib.request, 'urlopen', return_value=response):
+                self.assertEqual(p.refresh(), p.snapshots)
+            response.read1.assert_not_called()
+
     def test_fingerprint_pool_is_spread_by_tag_and_overrides_links(self):
         tls = {'enabled': True, 'utls': {'enabled': True, 'fingerprint': 'firefox'}}
         output = {'outbounds': [{'type': 'vless', 'tag': f'a_{i}', 'tls': tls} for i in range(40)]

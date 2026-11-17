@@ -81,6 +81,15 @@ Subscription specs retain the existing format; provider prefixes must be unique
 (a missing prefix is `''`, as in `sing-subs`). Local proxy leaves are discovered from the rendered graph;
 direct/block/DNS entries are excluded. Protocols have no special preference.
 
+Each subscription may set a private `headers` object, for example
+`"headers": {"User-Agent": "ExampleClient/1.0", "x-hwid": "stable-device-id-123", "x-device-os": "Linux"}`.
+Headers apply only to that subscription and override the default User-Agent/Accept
+case-insensitively. Keep device IDs stable across refreshes and restarts, and keep
+headers with the subscription URL in ignored `local-subs-config.json`. For
+Remnawave HWID, use 10–64 letters, digits, `=` or `-`. Select a client identity
+that returns a plain/base64 link list; Xray JSON and Clash YAML are not parsed.
+HWID refusal response headers fail refresh and preserve the last-good snapshot.
+
 For example, these synthetic settings prefer two subscription providers equally
 before a local proxy. Providers outside an explicit tier list are excluded.
 

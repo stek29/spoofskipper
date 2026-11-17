@@ -77,12 +77,29 @@ class _BoundHTTPSHandler(urllib.request.HTTPSHandler):
         return self.do_open(_bound(http.client.HTTPSConnection), req, context=self._context)
 
 
-def fetch_url(url: str) -> str:
+def read_headers(headers: Any = None) -> dict[str, str]:
+    """Validate private per-subscription headers without exposing their contents."""
+    if headers is None:
+        return {}
+    if not isinstance(headers, dict):
+        raise ValueError("subscription headers must be an object")
+    result = {}
+    for key, value in headers.items():
+        if (not isinstance(key, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", key)
+                or not isinstance(value, str) or any(ord(c) < 32 or ord(c) > 126 for c in value)
+                or key.lower() in result):
+            raise ValueError("invalid subscription header")
+        result[key.lower()] = value
+    return result
+
+
+def fetch_url(url: str, headers: dict[str, str] | None = None) -> str:
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "spoofskipper/sing-box",
-            "Accept": "*/*",
+            "user-agent": "spoofskipper/sing-box",
+            "accept": "*/*",
+            **read_headers(headers),
         },
     )
     # The socket timeout bounds each read; the deadline bounds a slow drip.
@@ -91,6 +108,10 @@ def fetch_url(url: str) -> str:
     urlopen = (urllib.request.build_opener(_BoundHTTPHandler, _BoundHTTPSHandler).open
                if BIND_INTERFACE else urllib.request.urlopen)
     with urlopen(request, timeout=30) as response:
+        response_headers = getattr(response, 'headers', {})
+        if any(response_headers.get(name, '').lower() in ('true', '1') for name in
+               ('x-hwid-not-supported', 'x-hwid-max-devices-reached', 'x-hwid-limit')):
+            raise ValueError("subscription HWID rejected")
         while chunk := response.read1(65536):
             body += chunk
             if len(body) > MAX_BODY_BYTES:
@@ -474,12 +495,13 @@ def generate_output(
     group_exclude_regex: str | None = None,
     exclude_transport_types: list[str] | None = None,
     log: Callable[..., None] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     name_pattern = re.compile(name_regex) if name_regex else None
     ignore_pattern = re.compile(ignore_regex) if ignore_regex else None
     group_exclude_pattern = re.compile(group_exclude_regex) if group_exclude_regex else None
 
-    body = fetch_url(url)
+    body = fetch_url(url, headers=read_headers(headers)) if headers is not None else fetch_url(url)
     decoded = decode_subscription_body(body)
     links = extract_links(decoded)
     unsupported = sum(1 for line in decoded.splitlines() if '://' in line and not line.strip().startswith(SUPPORTED_SCHEMES))
@@ -640,4 +662,5 @@ def render_subscription(spec: dict[str, Any], log: Callable[..., None] | None = 
         group_exclude_regex=spec.get("group_exclude_regex"),
         exclude_transport_types=exclude_transport_types,
         log=log,
+        headers=spec.get("headers"),
     )
