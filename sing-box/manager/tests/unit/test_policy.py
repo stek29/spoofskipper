@@ -314,5 +314,38 @@ class PolicySchedulingTests(unittest.TestCase):
         self.assertFalse(self.scheduler.client.cancelled.is_set())
 
 
+class ProviderGroupingTests(unittest.TestCase):
+    def test_derived_paths_share_budget_and_keep_measurements(self):
+        from spoofskipper_manager.dashboard import snapshot
+        from spoofskipper_manager.identity import sample_key
+        scheduler = Scheduler(lambda *a, **k: None, clock=lambda: 1000)
+        self.addCleanup(scheduler.close)
+        derived = [{'type': 'trojan', 'tag': f'local-{i}', 'server': 'fixture.test'} for i in range(5)]
+        direct = {'type': 'trojan', 'tag': 'vpn_lease_direct', 'server': 'fixture.test'}
+        config = {'outbounds': derived + [direct]}
+        subscribed = [{'provider': 'vpn_lease', 'outbound': direct, 'weight': 1}]
+        settings = {'probes_enabled': True}
+        scheduler.configure(config, subscribed, settings)
+        for i, outbound in enumerate(derived + [direct]):
+            scheduler.samples[sample_key(outbound)] = Sample(health=Health.HEALTHY, healthy_at=1000,
+                latency=50, successes=[(1000, i+1, 50)])
+        before = dict(scheduler.samples)
+        settings['outbound_providers'] = {o['tag']: 'vpn_lease_kz_via_warp' for o in derived}
+        scheduler.configure(config, subscribed, settings)
+        for key, sample in before.items():
+            self.assertIs(scheduler.samples[key], sample)
+        self.assertEqual({c.provider for c in scheduler.candidates.values()}, {'vpn_lease', 'vpn_lease_kz_via_warp'})
+        shortlisted = scheduler.shortlist(1000)
+        grouped = [k for k in shortlisted if scheduler.candidates[k].provider == 'vpn_lease_kz_via_warp']
+        self.assertEqual(len(grouped), 3)
+        rotation = scheduler.rotation(shortlisted, 1000)
+        self.assertEqual(list(rotation.values()), ['vpn_lease_kz_via_warp'])
+        scheduler.rotated_at['vpn_lease_kz_via_warp'] = 1000
+        self.assertFalse(scheduler.rotation(shortlisted, 1001))
+        page = snapshot(scheduler, config, 1000)
+        self.assertEqual(page['settings']['shortlist'], {'vpn_lease': 3, 'vpn_lease_kz_via_warp': 3})
+        self.assertEqual(page['settings']['rotation']['vpn_lease_kz_via_warp'], 14400)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -55,6 +55,8 @@ class Scheduler:
                 tag = outbound['tag']
                 provider = subscribed[tag]['provider'] if tag in subscribed else tag
                 weight = subscribed[tag]['weight'] if tag in subscribed else settings.provider_weights.get(tag, 1.0)
+                provider = settings.outbound_providers.get(tag, provider)
+                weight = settings.provider_weights.get(provider, weight)
                 entries.append(Candidate(outbound, provider, weight))
         self.candidates = {sample_key(c.outbound): c for c in entries}
         self.samples = {k: self.samples.get(k, Sample()) for k in self.candidates}

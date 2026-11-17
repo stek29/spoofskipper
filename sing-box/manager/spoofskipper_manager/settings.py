@@ -58,6 +58,7 @@ class Settings:
     probes_enabled: bool = False
     managed_selectors: tuple[str, ...] = ()
     provider_weights: Mapping[str, float] = field(default_factory=dict)
+    outbound_providers: Mapping[str, str] = field(default_factory=dict)
     selector_provider_weights: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
     selector_priorities: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
     probe_urls: tuple[str, ...] = DEFAULT_PROBE_URLS
@@ -69,7 +70,7 @@ class Settings:
         object.__setattr__(self, 'managed_selectors', tuple(self.managed_selectors))
         object.__setattr__(self, 'probe_urls', tuple(self.probe_urls))
         object.__setattr__(self, 'uplink_urls', tuple(self.uplink_urls))
-        for name in ('provider_weights', 'provider_shortlist_sizes', 'provider_rotation_seconds'):
+        for name in ('provider_weights', 'outbound_providers', 'provider_shortlist_sizes', 'provider_rotation_seconds'):
             object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
         object.__setattr__(self, 'selector_provider_weights', MappingProxyType({
             selector: MappingProxyType(dict(weights))
@@ -135,6 +136,10 @@ def load_settings(config_dir):
         if len(set(providers)) != len(providers):
             raise ValueError('duplicate provider in selector priorities')
     weights = settings.get('provider_weights', {})
+    aliases = settings.get('outbound_providers', {})
+    if not isinstance(aliases, dict) or any(not isinstance(tag, str) or not tag
+            or not isinstance(provider, str) or not provider for tag, provider in aliases.items()):
+        raise ValueError('outbound_providers must map outbound tags to non-empty provider names')
     if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
             or not math.isfinite(w) or w <= 0 for w in weights.values()):
         raise ValueError('provider weights must be positive finite numbers')

@@ -49,6 +49,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `probes_enabled` | `false` | Add loopback probe routes and run measurements |
 | `managed_selectors` | `[]` | Selector tags the manager may write; requires probes |
 | `provider_weights` | `{}` | Positive finite weight by subscription prefix or local proxy/endpoint tag; omitted weights are 1 |
+| `outbound_providers` | `{}` | Exact outbound-tag → logical provider name; group derived/local paths under one shared shortlist and rotation budget without changing their traffic paths or measurement identities |
 | `selector_provider_weights` | `{}` | Per-selector maps of provider weights, overriding the default weight for that selector only; measurements stay shared |
 | `selector_priorities` | `{}` | Ordered provider tiers per selector; omitted selectors use score alone |
 | `refresh_seconds` | 7200 | Subscription refresh interval |

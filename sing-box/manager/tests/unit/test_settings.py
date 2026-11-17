@@ -17,6 +17,7 @@ INVALID = [
     *({'selector_priorities': priorities}
       for priorities in ([], {'x': []}, {'x': [['a'], ['a']]}, {'x': ['a']}, {'x': [[1]]})),
     {'provider_weights': {'a': -1}},
+    *({'outbound_providers': value} for value in ([], {'': 'p'}, {'a': ''}, {'a': 1}, {'a': []})),
     *({'selector_provider_weights': value} for value in (
         [], {'': {'p': 1}}, {'main': []}, {'main': {'': 1}},
         {'main': {'p': 0}}, {'main': {'p': True}}, {'main': {'p': float('nan')}},
@@ -58,6 +59,7 @@ class SettingsTests(unittest.TestCase):
     def test_valid_settings_are_immutable(self):
         settings = self.load({'probes_enabled': True, 'managed_selectors': ['choice'],
                               'provider_weights': {'p': 2},
+                              'outbound_providers': {'derived': 'p'},
                               'selector_provider_weights': {'choice': {'p': 1.4}},
                               'selector_priorities': {'choice': [['p', 'q'], ['local']]}})
         self.assertEqual(settings.probe_urls, DEFAULT_PROBE_URLS)
@@ -66,6 +68,8 @@ class SettingsTests(unittest.TestCase):
             settings.probes_enabled = False
         with self.assertRaises(TypeError):
             settings.provider_weights['p'] = 3
+        with self.assertRaises(TypeError):
+            settings.outbound_providers['derived'] = 'other'
         with self.assertRaises(TypeError):
             settings.selector_provider_weights['choice']['p'] = 3
         self.assertEqual(settings.weight_for('choice', 'p', 2), 1.4)
