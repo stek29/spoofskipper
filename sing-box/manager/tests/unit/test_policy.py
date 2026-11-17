@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spoofskipper_manager import clash_api
 from spoofskipper_manager.identity import Candidate, SampleKey
-from spoofskipper_manager.policy import Policy, score
+from spoofskipper_manager.policy import Policy, score, eligible_pool
 from spoofskipper_manager.scheduler import Health, Sample, Scheduler
 from spoofskipper_manager.probes import THROTTLE, Probe, ProbeResult
 SKIP = 4 * 1024 * 1024
@@ -48,6 +48,23 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNotNone(score(s, 1, 8201, SCORE_MAX_AGE, 100))
         s.health = Health.FAILED
         self.assertIsNone(score(s, 1, 1000, 7200, 100))
+
+    def test_selector_weights_change_ranking_without_changing_shared_measurements(self):
+        settings = Settings(selector_provider_weights={
+            'proxy_main': {'preferred': 1.25}, 'warp_upstream': {'preferred': 1.4}})
+        # The other provider wins at 1.25, but loses at 1.4.
+        self.candidates[key('c')] = Candidate({}, 'other', 1.3)
+        main = eligible_pool('proxy_main', 'a', self.candidates, self.samples, self.now, settings, self.members)
+        warp = eligible_pool('warp_upstream', 'a', self.candidates, self.samples, self.now, settings, self.members)
+        self.assertGreater(main.value(key('c')), main.value(key('a')))
+        self.assertGreater(warp.value(key('a')), warp.value(key('c')))
+        self.assertAlmostEqual(warp.value(key('a')) / main.value(key('a')), 1.4 / 1.25)
+        self.assertEqual(self.p.decide('proxy_main', 'missing', self.candidates, self.samples,
+                         self.now, settings, self.members).target, key('c'))
+        self.assertIn(self.p.decide('warp_upstream', 'missing', self.candidates, self.samples,
+                      self.now, settings, self.members).target, (key('a'), key('b')))
+        self.assertIs(main.samples[key('a')], warp.samples[key('a')])
+        self.assertEqual(self.candidates[key('a')].weight, 1.25)
 
     def test_elective_switch_needs_margin_hold_and_fresh_throughput(self):
         self.sample('b').successes = [(1000, 11, 50)]  # Within the 15% margin.

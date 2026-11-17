@@ -75,6 +75,19 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('https://probe.test/x?bytes={bytes}', body)
         self.assertIn('No snapshot yet', render(None, 0, 0))
 
+    def test_selector_weight_is_used_for_scores_margins_and_display(self):
+        self.scheduler.settings = self.scheduler.settings.with_changes(
+            selector_provider_weights={'deep': {'blanc': 1.4, 'warp': 1.25}})
+        page = snapshot(self.scheduler, self.config, self.now, wall=0)
+        deep = next(s for s in page['selectors'] if s['tag'] == 'deep')
+        a, b = (next(row for row in deep['rows'] if row['tag'] == tag) for tag in ('a', 'b'))
+        self.assertEqual((a['weight'], b['weight']), (1.4, 1.25))
+        key = next(k for k in self.scheduler.samples if k.tag == 'b')
+        expected = score(self.scheduler.samples[key], 1.25, self.now, ACTIVE_SCORE_MAX_AGE, 150)
+        self.assertAlmostEqual(deep['incumbent'], expected)
+        self.assertAlmostEqual(b['score'], expected)
+        self.assertIn('deep: blanc 1.4, warp 1.25', render(page, self.now, 0))
+
     def test_probe_outcomes_show_what_an_attempt_yielded(self):
         sample = next(s for k, s in self.scheduler.samples.items() if k.tag == 'a')
         for probe, outcome in ((Probe.GATE, 'failed (timeout)'), (Probe.THROUGHPUT, 'no rate: too slow to measure')):

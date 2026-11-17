@@ -77,6 +77,8 @@ def snapshot(scheduler, config, now, wall=None):
                          'managed_selectors': list(settings.managed_selectors),
                          'selector_priorities': {t: [list(x) for x in tiers] for t, tiers in settings.selector_priorities.items()},
                          'provider_weights': dict(settings.provider_weights),
+                         'selector_provider_weights': {tag: dict(weights)
+                                                      for tag, weights in settings.selector_provider_weights.items()},
                          'rate_cap_mbps': settings.rate_cap_mbps,
                          'throughput_mib': (settings.throughput_skip_mib, settings.throughput_evidence_mib,
                                             settings.throughput_max_mib),
@@ -114,8 +116,7 @@ def _managed(scheduler, selector, now, shortlisted):
                       'retry_in': max(0, retry_in(last, probe, decision.since, now, settings))})
     incumbent = None
     if pool.active is not None:
-        terms = score_terms(scheduler.samples[pool.active], now, ACTIVE_SCORE_MAX_AGE, settings.rate_cap_mbps)
-        incumbent = None if terms is None else scheduler.candidates[pool.active].weight * terms[2] * terms[3]
+        incumbent = pool.value(pool.active, ACTIVE_SCORE_MAX_AGE)
     keys = [key for key in scheduler.candidates if key.tag in members]
     rows = [_row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent) for key in keys]
     # Policy order: tier first (excluded last), then score, then latency.
@@ -140,7 +141,8 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
     elsewhere = sorted(tag for tag, leaf in scheduler.active.items() if leaf == key.tag and tag != selector)
     max_age = ACTIVE_SCORE_MAX_AGE if current else SCORE_MAX_AGE
     terms = score_terms(sample, now, max_age, settings.rate_cap_mbps)
-    value = None if terms is None else candidate.weight * terms[2] * terms[3]
+    weight = settings.weight_for(selector, candidate.provider, candidate.weight)
+    value = None if terms is None else weight * terms[2] * terms[3]
     tier = None if tiers is None else pool.priorities.get(key, 'excluded')
     last = lambda probe: sample.last.get(probe, -INF)
     healthy = sample.health is Health.HEALTHY
@@ -182,7 +184,7 @@ def _row(scheduler, selector, pool, key, tiers, now, shortlisted, incumbent):
     running = [probe.value for k, probe, _ in scheduler.jobs.values() if k == key]
     requested = scheduler.requested.get(key)
     return {'tag': key.tag, 'via': _detour(scheduler, key.tag),
-            'provider': candidate.provider, 'tier': tier, 'weight': candidate.weight,
+            'provider': candidate.provider, 'tier': tier, 'weight': weight,
             'current': current, 'health': sample.health.value, 'failures': sample.failures,
             'failed_probe': sample.failed_probe.value if sample.failed_probe else None,
             'healthy_age': _age(now, sample.healthy_at), 'latency': sample.latency, 'eligibility': eligibility,
@@ -271,6 +273,8 @@ def render(page, now, wall):
         ('Managed selectors', e(', '.join(s['managed_selectors']) or '—')),
         ('Priorities', '<br>'.join(e(f'{t}: {tiers(x)}') for t, x in s['selector_priorities'].items()) or '—'),
         ('Provider weights', e(', '.join(f'{p} {w:g}' for p, w in s['provider_weights'].items()) or 'all 1')),
+        ('Selector provider weights', '<br>'.join(e(f'{tag}: ' + ', '.join(f'{p} {w:g}' for p, w in weights.items()))
+                                                for tag, weights in s['selector_provider_weights'].items()) or '—'),
         ('Throughput', e('skip {:g} MiB, stop at {:g} MiB scored or once {:g} MiB beat the cap; cap '.format(
             *(s['throughput_mib'][i] for i in (0, 2, 1))) + f'{s["rate_cap_mbps"]:g} Mbps')),
         ('Shortlist · rotation', '<br>'.join(e(f'{p} {s["shortlist"][p]} · every {_dur(s["rotation"][p])}')

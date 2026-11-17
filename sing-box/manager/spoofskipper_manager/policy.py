@@ -40,6 +40,7 @@ class EligiblePool:
     active: tuple | None
     members: tuple
     priorities: dict | None
+    selector: str = ''
     unresolved: tuple = ()
 
     def healthy(self, key):
@@ -58,7 +59,9 @@ class EligiblePool:
     def value(self, key, max_age=None):
         if max_age is None:
             max_age = SCORE_MAX_AGE
-        return score(self.samples[key], self.candidates[key].weight, self.now, max_age, self.settings.rate_cap_mbps)
+        candidate = self.candidates[key]
+        weight = self.settings.weight_for(self.selector, candidate.provider, candidate.weight)
+        return score(self.samples[key], weight, self.now, max_age, self.settings.rate_cap_mbps)
 
     def rank(self, key, max_age=None):
         if max_age is None:
@@ -78,7 +81,7 @@ def eligible_pool(selector, current, candidates, samples, now, settings, members
     allowed = {key: candidate for key, candidate in candidates.items()
                if key.tag in members and (priorities is None or key in priorities)}
     active = next((key for key in allowed if key.tag == current), None)
-    pool = EligiblePool(allowed, samples, now, settings, active, tuple(allowed), priorities)
+    pool = EligiblePool(allowed, samples, now, settings, active, tuple(allowed), priorities, selector=selector)
     if tiers is not None:
         # A lower tier is eligible only once every member above it has failed.
         pool.members = ()

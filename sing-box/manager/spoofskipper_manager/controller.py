@@ -64,7 +64,9 @@ class SelectorController:
                 key = next((k for k in measurements.candidates if k.tag == tag), None)
                 if key:
                     sample = measurements.samples[key]
-                    compared.append({'candidate': tag, 'score': score(sample, measurements.candidates[key].weight, now,
+                    candidate = measurements.candidates[key]
+                    weight = measurements.settings.weight_for(selector, candidate.provider, candidate.weight)
+                    compared.append({'candidate': tag, 'score': score(sample, weight, now,
                         ACTIVE_SCORE_MAX_AGE if tag == measurements.active[selector] else SCORE_MAX_AGE,
                         measurements.settings.rate_cap_mbps),
                         'sample_age': now-sample.throughput_at if sample.successes else None})

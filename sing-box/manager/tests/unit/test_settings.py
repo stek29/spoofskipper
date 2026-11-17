@@ -17,6 +17,10 @@ INVALID = [
     *({'selector_priorities': priorities}
       for priorities in ([], {'x': []}, {'x': [['a'], ['a']]}, {'x': ['a']}, {'x': [[1]]})),
     {'provider_weights': {'a': -1}},
+    *({'selector_provider_weights': value} for value in (
+        [], {'': {'p': 1}}, {'main': []}, {'main': {'': 1}},
+        {'main': {'p': 0}}, {'main': {'p': True}}, {'main': {'p': float('nan')}},
+        {'main': {'p': float('inf')}}, {'main': {'p': '1.4'}})),
     {'revision_timeout': 0},
     {'probe_workers': 5},
     {'probe_port': 19089},  # Same as clash_api_port.
@@ -54,6 +58,7 @@ class SettingsTests(unittest.TestCase):
     def test_valid_settings_are_immutable(self):
         settings = self.load({'probes_enabled': True, 'managed_selectors': ['choice'],
                               'provider_weights': {'p': 2},
+                              'selector_provider_weights': {'choice': {'p': 1.4}},
                               'selector_priorities': {'choice': [['p', 'q'], ['local']]}})
         self.assertEqual(settings.probe_urls, DEFAULT_PROBE_URLS)
         self.assertEqual(settings.selector_priorities['choice'], (('p', 'q'), ('local',)))
@@ -61,6 +66,11 @@ class SettingsTests(unittest.TestCase):
             settings.probes_enabled = False
         with self.assertRaises(TypeError):
             settings.provider_weights['p'] = 3
+        with self.assertRaises(TypeError):
+            settings.selector_provider_weights['choice']['p'] = 3
+        self.assertEqual(settings.weight_for('choice', 'p', 2), 1.4)
+        self.assertEqual(settings.weight_for('other', 'p', 2), 2)
+        self.assertEqual(settings.weight_for('other', 'p'), 2)
         self.assertEqual(settings.with_changes(managed_selectors=()).managed_selectors, ())
         self.assertEqual(settings.managed_selectors, ('choice',))
         self.assertEqual(self.load({'dashboard_listen': '[::]:9091'}).dashboard_listen, '[::]:9091')

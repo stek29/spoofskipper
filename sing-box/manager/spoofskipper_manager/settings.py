@@ -58,6 +58,7 @@ class Settings:
     probes_enabled: bool = False
     managed_selectors: tuple[str, ...] = ()
     provider_weights: Mapping[str, float] = field(default_factory=dict)
+    selector_provider_weights: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
     selector_priorities: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
     probe_urls: tuple[str, ...] = DEFAULT_PROBE_URLS
     uplink_urls: tuple[str, ...] = DEFAULT_UPLINK_URLS
@@ -70,6 +71,9 @@ class Settings:
         object.__setattr__(self, 'uplink_urls', tuple(self.uplink_urls))
         for name in ('provider_weights', 'provider_shortlist_sizes', 'provider_rotation_seconds'):
             object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
+        object.__setattr__(self, 'selector_provider_weights', MappingProxyType({
+            selector: MappingProxyType(dict(weights))
+            for selector, weights in self.selector_provider_weights.items()}))
         object.__setattr__(self, 'selector_priorities', MappingProxyType({
             tag: tuple(tuple(tier) for tier in tiers)
             for tag, tiers in self.selector_priorities.items()}))
@@ -85,6 +89,11 @@ class Settings:
 
     def shortlist_for(self, provider):
         return self.provider_shortlist_sizes.get(provider, self.shortlist_size)
+
+    def weight_for(self, selector, provider, fallback=None):
+        if fallback is None:
+            fallback = self.provider_weights.get(provider, 1.0)
+        return self.selector_provider_weights.get(selector, {}).get(provider, fallback)
 
     def rotation_for(self, provider):
         return self.provider_rotation_seconds.get(provider, self.throughput_rotation_seconds)
@@ -129,6 +138,14 @@ def load_settings(config_dir):
     if not isinstance(weights, dict) or any(not isinstance(w, (int, float)) or isinstance(w, bool)
             or not math.isfinite(w) or w <= 0 for w in weights.values()):
         raise ValueError('provider weights must be positive finite numbers')
+    selector_weights = settings.get('selector_provider_weights', {})
+    if (not isinstance(selector_weights, dict) or any(
+            not isinstance(selector, str) or not selector or not isinstance(weights, dict)
+            or any(not isinstance(provider, str) or not provider or not isinstance(w, (int, float))
+                   or isinstance(w, bool) or not math.isfinite(w) or w <= 0
+                   for provider, w in weights.items())
+            for selector, weights in selector_weights.items())):
+        raise ValueError('selector provider weights must be positive finite numbers')
     sizes, rotations = settings.get('provider_shortlist_sizes', {}), settings.get('provider_rotation_seconds', {})
     if not isinstance(sizes, dict) or any(not isinstance(n, int) or isinstance(n, bool) or n < 0 for n in sizes.values()):
         raise ValueError('provider shortlist sizes must be non-negative integers')
