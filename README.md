@@ -100,6 +100,39 @@ The template defines a shared `direct` HTTP client and selects it with
 `http_client: { detour: 'proxy' }` on additional remote rule-sets.
 Shared clients can be customized with `http_clients` and `default_http_client`.
 
+#### IPv4-only DNS answers for selected domains
+
+Set `ipv4_only_geosites: ['yandex']` in `config/sing/config.jsonnet` to return
+empty `NOERROR` answers for `AAAA`, `HTTPS`, and `SVCB` queries that match the
+Yandex geosite. `A` queries follow the existing DNS rules.
+
+For manual domains, add `ipv4_only_rule_sets: ['local-ipv4-only']` and append
+this object to your existing `extra_rule_sets` array:
+
+```jsonnet
+{
+  tag: 'local-ipv4-only',
+  type: 'local',
+  format: 'source',
+  path: '/config/local-ipv4-only.json',
+}
+```
+
+Create `config/sing/local-ipv4-only.json` with your domain rules:
+
+```json
+{
+  "version": 1,
+  "rules": [
+    { "domain": ["host.example"] },
+    { "domain_suffix": ["site.example"] }
+  ]
+}
+```
+
+A match from either list applies the same DNS policy. The local JSON file and
+`config.jsonnet` are ignored by Git.
+
 ### WARP WireGuard endpoint
 
 `warpgen` registers a WARP device through the `wgcf` library and writes a

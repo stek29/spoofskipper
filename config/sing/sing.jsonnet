@@ -93,6 +93,10 @@ local default_config = {
     'antizapret',
   ],
 
+  // geosites and extra rule-set tags whose AAAA, HTTPS, and SVCB queries get no answers
+  ipv4_only_geosites: [],
+  ipv4_only_rule_sets: [],
+
   // extra rule sets
   extra_rule_sets: [
     // example for local rule_set
@@ -135,7 +139,7 @@ local geosite_rule_sets = [
     http_client: config.gs_http_client,
   }
   for geosite_name in std.uniq(std.sort(
-    config.proxy_geosites + config.zapret_geosites
+    config.proxy_geosites + config.zapret_geosites + config.ipv4_only_geosites
   ))
 ];
 
@@ -144,6 +148,9 @@ local geosite_tags(names) = ['gs-' + n for n in std.uniq(std.sort(names))];
 local proxy_rule_sets = std.sort(config.proxy_rule_sets + geosite_tags(config.proxy_geosites));
 local zapret_rule_sets = std.sort(config.zapret_rule_sets + geosite_tags(config.zapret_geosites));
 local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
+local ipv4_only_rule_sets = std.uniq(std.sort(
+  config.ipv4_only_rule_sets + geosite_tags(config.ipv4_only_geosites)
+));
 
 {
   log: config.log,
@@ -167,6 +174,14 @@ local hijack_rule_sets = std.sort(proxy_rule_sets + zapret_rule_sets);
         rcode: 'NOERROR',
         domain: config.blocked_domains,
       },
+    ] + (if std.length(ipv4_only_rule_sets) > 0 then [
+      {
+        action: 'predefined',
+        rcode: 'NOERROR',
+        query_type: ['AAAA', 'HTTPS', 'SVCB'],
+        rule_set: ipv4_only_rule_sets,
+      },
+    ] else []) + [
       {
         server: 'zapret',
         query_type: ['A', 'AAAA', 'CNAME'],
