@@ -48,6 +48,7 @@ class Manager:
         self.child = None
         self.stopping = None
         self.reload_requested = False
+        self.refresh_requested = False
         self.current = None
         self.scheduler = Scheduler(log, state_path=self.root / 'measurements.json')
         self.scheduler_errors = {}
@@ -73,6 +74,8 @@ class Manager:
     def signal(self, number, _frame):
         if number == signal.SIGHUP:
             self.reload_requested = True
+        elif number == signal.SIGUSR1:
+            self.refresh_requested = True
         elif self.stopping is None:
             self.stopping = number
             if self.child and self.child.poll() is None:
@@ -87,11 +90,13 @@ class Manager:
     def alive(self):
         return self.child is not None and self.child.poll() is None
 
-    def wait(self, seconds):
+    def wait(self, seconds, *, wake_for_refresh=False):
         until = time.monotonic() + seconds
         while time.monotonic() < until:
             if self.stopping:
                 raise Stopping()
+            if wake_for_refresh and self.refresh_requested:
+                return
             time.sleep(min(0.1, max(0, until - time.monotonic())))
 
     def start(self):
@@ -288,7 +293,7 @@ class Manager:
         self.stop_child()
 
     def run(self):
-        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGUSR1):
             signal.signal(number, self.signal)
         try:
             self.dashboard.listen(self.settings.dashboard_listen)
@@ -308,7 +313,7 @@ class Manager:
                 log('cached_render_failed', error=type(exc).__name__)
                 if self.current is not None:
                     pending = None
-            fetched = False
+            attempts = {}
             next_refresh = 0
             backoff = self.settings.bootstrap_backoff_seconds
             while True:
@@ -318,40 +323,47 @@ class Manager:
                     log('unexpected_core_exit', returncode=self.child.returncode)
                     return 1
                 now = time.monotonic()
-                if pending is not None or self.reload_requested or now >= next_refresh:
-                    reload_only = self.reload_requested
+                if pending is not None or self.reload_requested or self.refresh_requested or now >= next_refresh:
+                    force_refresh = self.refresh_requested
+                    if force_refresh:
+                        self.refresh_requested = False
+                        pending = None
+                        log('subscription_refresh_requested')
+                    reload_only = self.reload_requested and not force_refresh
                     self.reload_requested = False
                     try:
                         self.settings = self.read_settings()
+                        next_refresh = now + self.settings.refresh_seconds
                         self.dashboard.listen(self.settings.dashboard_listen)
                         self.scheduler.restrict(self.settings)
                         providers = Providers(self.config_dir, self.root, self.settings, log)
                         if pending is None:
-                            pending = dict(providers.snapshots) if reload_only else providers.refresh(self.tick_scheduler)
-                            fetched = not reload_only
+                            pending = (dict(providers.snapshots) if reload_only else
+                                       providers.refresh(self.tick_scheduler, attempts=attempts, force=force_refresh))
+                        next_refresh = providers.next_refresh(attempts)
                         if not pending and providers.configured:
-                            log('bootstrap_waiting_for_providers')
                             pending = None
-                            next_refresh = now + backoff
-                            self.wait(backoff)
-                            backoff = min(backoff * 2, self.settings.bootstrap_backoff_max_seconds)
+                            if not reload_only:
+                                log('bootstrap_waiting_for_providers')
+                                attempts.clear()
+                                next_refresh = time.monotonic() + backoff
+                                self.wait(backoff, wake_for_refresh=True)
+                                backoff = min(backoff * 2, self.settings.bootstrap_backoff_max_seconds)
                             continue
                         self.activate_and_configure(self.prepare(pending, providers), providers, pending)
                         providers.commit(pending)
                         pending = None
                         backoff = self.settings.bootstrap_backoff_seconds
-                        if not reload_only:
-                            next_refresh = time.monotonic() + (self.settings.refresh_seconds if fetched else 0)
+                        next_refresh = providers.next_refresh(attempts)
                     except (Stopping, RecoveryFailed):
                         raise
                     except Exception as exc:
                         log('refresh_failed', error=type(exc).__name__)
                         if self.current is not None:
                             pending = None
-                            next_refresh = time.monotonic() + self.settings.refresh_seconds
                         else:
                             # Retain fetched snapshots in memory: runtime retries do not refetch.
-                            self.wait(backoff)
+                            self.wait(backoff, wake_for_refresh=True)
                             backoff = min(backoff * 2, self.settings.bootstrap_backoff_max_seconds)
                 self.tick_scheduler()
                 self.wait(0.1)

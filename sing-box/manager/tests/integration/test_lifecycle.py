@@ -49,11 +49,13 @@ class LifecycleHarness(unittest.TestCase):
         self.config, self.state = self.root / 'config', self.root / 'data'
         shutil.copytree(FIXTURES, self.config)
         self.requests = 0
+        self.request_paths = []
         self.mode = 'ok'
         owner = self
         class Subscription(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 owner.requests += 1
+                owner.request_paths.append(self.path)
                 if owner.mode == 'stall':
                     time.sleep(20)
                     return
@@ -109,6 +111,33 @@ class LifecycleHarness(unittest.TestCase):
 
 
 class LifecycleTests(LifecycleHarness):
+    def test_forced_refresh_rereads_urls_and_fetches_all_before_they_are_due(self):
+        self.specs['subscriptions'].append({**self.specs['subscriptions'][0], 'prefix': 'other',
+                                            'url': self.url + '/other'})
+        write_json(self.config / 'local-subs-config.json', self.specs)
+        write_json(self.config / 'local-manager.json', {**self.settings, 'refresh_seconds': 7200})
+        self.start()
+        self.ready()
+        self.assertEqual(self.request_paths, ['/ok', '/other'])
+
+        self.specs['subscriptions'][0]['url'] = self.url + '/new'
+        write_json(self.config / 'local-subs-config.json', self.specs)
+        self.proc.send_signal(signal.SIGHUP)
+        wait_for(lambda: 'activation_unchanged' in self.logs())
+        self.assertEqual(self.request_paths, ['/ok', '/other'])
+
+        self.proc.send_signal(signal.SIGUSR1)
+        wait_for(lambda: self.logs().count('activation_unchanged') == 2)
+        self.assertEqual(self.request_paths, ['/ok', '/other', '/new', '/other'])
+        self.assertIn('subscription_refresh_requested', self.logs())
+        self.assertEqual(self.logs().count('core_started'), 1)
+
+        self.specs['subscriptions'][0]['refresh_seconds'] = .2
+        write_json(self.config / 'local-subs-config.json', self.specs)
+        self.proc.send_signal(signal.SIGHUP)
+        wait_for(lambda: self.request_paths.count('/new') >= 2)
+        self.assertEqual(self.request_paths.count('/other'), 2)
+
     def test_partial_first_start_guarded_addition_outage_and_noop_age(self):
         self.specs['subscriptions'].append({**self.specs['subscriptions'][0], 'prefix': 'later', 'url': self.url + '/missing'})
         write_json(self.config / 'local-subs-config.json', self.specs)

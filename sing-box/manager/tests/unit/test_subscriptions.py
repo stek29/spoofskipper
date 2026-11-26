@@ -26,12 +26,12 @@ class SubscriptionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def providers(self):
-        return subs.Providers(self.config, self.state, {'provider_weights': {'a': 1.25}},
+    def providers(self, **settings):
+        return subs.Providers(self.config, self.state, {'provider_weights': {'a': 1.25}, **settings},
                               lambda event, **fields: self.events.append((event, fields)))
 
     def test_partial_cached_merge_addition_removal_noop_ages(self):
-        def fetch(url):
+        def fetch(url, **_):
             if url.endswith('b'):
                 raise ValueError('private-url-do-not-log')
             return 'trojan://secret@localhost:443#one'
@@ -65,6 +65,54 @@ class SubscriptionTests(unittest.TestCase):
             with patch.object(parser, 'fetch_url', return_value=body):
                 self.assertEqual(p.refresh(), p.snapshots)
 
+    def test_provider_deadlines_use_override_or_capped_advertisement(self):
+        self.specs['subscriptions'] += [dict(self.specs['subscriptions'][0], prefix=p, url='https://invalid.test/' + p)
+                                        for p in ('c', 'd')]
+        self.specs['subscriptions'][2]['refresh_seconds'] = 20000
+        (self.config / 'local-subs-config.json').write_text(json.dumps(self.specs))
+        providers = self.providers(refresh_seconds=7200)
+        clock = 100
+        attempts = {}
+        calls = []
+
+        def fetch(url, *, metadata, **_):
+            prefix = url.rsplit('/', 1)[1]
+            calls.append(prefix)
+            if prefix != 'd':
+                metadata['profile_refresh_seconds'] = 3600 if prefix in ('a', 'c') else 43200
+            return 'trojan://s@localhost:443#one'
+
+        with patch.object(parser, 'fetch_url', side_effect=fetch), patch.object(subs.time, 'monotonic', lambda: clock):
+            providers.commit(providers.refresh(attempts=attempts))
+            self.assertEqual(calls, ['a', 'b', 'c', 'd'])
+            providers = self.providers(refresh_seconds=7200)
+            self.assertEqual(providers.next_refresh(attempts), 3700)
+            calls.clear()
+            clock = 3700
+            providers.commit(providers.refresh(attempts=attempts))
+            self.assertEqual(calls, ['a'])
+            calls.clear()
+            clock = 7300
+            providers.commit(providers.refresh(attempts=attempts))
+            self.assertEqual(calls, ['a', 'b', 'd'])
+            self.assertEqual(providers.next_refresh(attempts), 10900)
+            calls.clear()
+            providers.commit(providers.refresh(attempts=attempts, force=True))
+            self.assertEqual(calls, ['a', 'b', 'c', 'd'])
+
+        clock = 10900
+        with patch.object(parser, 'fetch_url', side_effect=OSError), patch.object(subs.time, 'monotonic', lambda: clock):
+            self.assertEqual(providers.refresh(attempts=attempts), providers.snapshots)
+            self.assertEqual(providers.next_refresh(attempts), 14500)
+
+    def test_invalid_refresh_seconds_are_rejected(self):
+        for value in (None, '3600', True, 0, -1, float('inf'), float('nan')):
+            with self.subTest(value=value):
+                self.specs['subscriptions'][0]['refresh_seconds'] = value
+                (self.config / 'local-subs-config.json').write_text(json.dumps(self.specs))
+                with self.assertRaisesRegex(ValueError, 'subscription refresh_seconds'):
+                    self.providers()
+
     def test_parser_output_matches_golden_all_protocols(self):
         golden = json.loads((ROOT / 'manager/tests/fixtures/parser-golden.json').read_text())
         body = golden['body']
@@ -91,8 +139,9 @@ class SubscriptionTests(unittest.TestCase):
 
     def test_fetch_is_bounded(self):
         class Response:
-            def __init__(self, chunks):
+            def __init__(self, chunks, headers=None):
                 self.chunks = iter(chunks)
+                self.headers = headers or {}
             def __enter__(self):
                 return self
             def __exit__(self, *args):
@@ -110,6 +159,12 @@ class SubscriptionTests(unittest.TestCase):
                 parser.fetch_url('https://invalid.test/')
         with patch.object(parser.urllib.request, 'urlopen', return_value=Response([b' ok\n'])):
             self.assertEqual(parser.fetch_url('https://invalid.test/'), 'ok')
+        for value, expected in ((' 12 ', 43200), ('', None), ('0', None), ('-2', None), ('2.5', None), ('garbage', None)):
+            metadata = {}
+            response = Response([b'ok'], {'profile-update-interval': value})
+            with patch.object(parser.urllib.request, 'urlopen', return_value=response):
+                self.assertEqual(parser.fetch_url('https://invalid.test/', metadata=metadata), 'ok')
+            self.assertEqual(metadata.get('profile_refresh_seconds'), expected)
 
     def test_provider_headers_reach_http_request_and_stay_provider_specific(self):
         import http.server, threading
@@ -118,6 +173,7 @@ class SubscriptionTests(unittest.TestCase):
             def do_GET(self):
                 received.append(dict(self.headers))
                 self.send_response(200)
+                self.send_header('Profile-Update-Interval', '6')
                 self.end_headers()
                 self.wfile.write(b'trojan://s@localhost:443#one')
             def log_message(self, *_):
@@ -128,7 +184,9 @@ class SubscriptionTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         spec = {'url': f'http://127.0.0.1:{server.server_port}/',
                 'headers': {'user-agent': 'ExampleClient/1.0', 'X-Hwid': 'fixture-device-123'}}
-        self.assertEqual(len(parser.render_subscription(spec)['outbounds']), 1)
+        metadata = {}
+        self.assertEqual(len(parser.render_subscription(spec, metadata=metadata)['outbounds']), 1)
+        self.assertEqual(metadata, {'profile_refresh_seconds': 21600})
         parser.render_subscription({'url': spec['url']})
         self.assertEqual(received[0]['User-Agent'], 'ExampleClient/1.0')
         self.assertEqual(received[0]['X-Hwid'], 'fixture-device-123')
@@ -183,7 +241,7 @@ class SubscriptionTests(unittest.TestCase):
 
     def test_bootstrap_seeds_all_providers_or_nothing(self):
         log = lambda event, **fields: self.events.append((event, fields))
-        with patch.object(parser, 'fetch_url', lambda url: 1/0 if url.endswith('b') else 'trojan://s@localhost:443#one'):
+        with patch.object(parser, 'fetch_url', lambda url, **_: 1/0 if url.endswith('b') else 'trojan://s@localhost:443#one'):
             self.assertEqual(subs.bootstrap(self.config, self.state, log), 1)
         self.assertFalse((self.state / 'providers').exists())  # A partial seed would drop provider b.
         self.assertEqual(self.events[-1], ('bootstrap_failed', {'missing': ['b']}))

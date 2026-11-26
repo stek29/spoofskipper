@@ -12,5 +12,5 @@ RUN set -eu \
     ;
 
 COPY ./manager/spoofskipper_manager /opt/manager/spoofskipper_manager
-COPY ./entrypoint ./reload /
+COPY ./entrypoint ./reload ./refresh /
 ENTRYPOINT [ "/entrypoint" ]

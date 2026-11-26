@@ -9,6 +9,7 @@ import hashlib
 import http.client
 import ipaddress
 import json
+import math
 import re
 import socket
 import time
@@ -93,7 +94,8 @@ def read_headers(headers: Any = None) -> dict[str, str]:
     return result
 
 
-def fetch_url(url: str, headers: dict[str, str] | None = None) -> str:
+def fetch_url(url: str, headers: dict[str, str] | None = None, *,
+              metadata: dict[str, float] | None = None) -> str:
     request = urllib.request.Request(
         url,
         headers={
@@ -118,6 +120,12 @@ def fetch_url(url: str, headers: dict[str, str] | None = None) -> str:
                 raise ValueError("subscription body too large")
             if time.monotonic() > deadline:
                 raise TimeoutError("subscription fetch deadline")
+        if metadata is not None:
+            hours = response_headers.get('profile-update-interval', '').strip()
+            if re.fullmatch(r'[0-9]+', hours):
+                seconds = float(hours) * 3600
+                if 0 < seconds and math.isfinite(seconds):
+                    metadata['profile_refresh_seconds'] = seconds
     return body.decode("utf-8", errors="replace").strip()
 
 
@@ -496,12 +504,14 @@ def generate_output(
     exclude_transport_types: list[str] | None = None,
     log: Callable[..., None] | None = None,
     headers: dict[str, str] | None = None,
+    *,
+    metadata: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     name_pattern = re.compile(name_regex) if name_regex else None
     ignore_pattern = re.compile(ignore_regex) if ignore_regex else None
     group_exclude_pattern = re.compile(group_exclude_regex) if group_exclude_regex else None
 
-    body = fetch_url(url, headers=read_headers(headers)) if headers is not None else fetch_url(url)
+    body = fetch_url(url, headers=headers, metadata=metadata)
     decoded = decode_subscription_body(body)
     links = extract_links(decoded)
     unsupported = sum(1 for line in decoded.splitlines() if '://' in line and not line.strip().startswith(SUPPORTED_SCHEMES))
@@ -636,7 +646,8 @@ def merge_outputs(outputs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"outbounds": merged_outbounds, "groups": merged_groups}
 
 
-def render_subscription(spec: dict[str, Any], log: Callable[..., None] | None = None) -> dict[str, Any]:
+def render_subscription(spec: dict[str, Any], log: Callable[..., None] | None = None, *,
+                        metadata: dict[str, float] | None = None) -> dict[str, Any]:
     url = spec.get("url")
     if not isinstance(url, str) or not url:
         raise ValueError("each subscription must include a non-empty string url")
@@ -663,4 +674,5 @@ def render_subscription(spec: dict[str, Any], log: Callable[..., None] | None = 
         exclude_transport_types=exclude_transport_types,
         log=log,
         headers=spec.get("headers"),
+        metadata=metadata,
     )

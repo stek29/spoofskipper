@@ -1,9 +1,14 @@
 # Outbound manager
 
-The manager supervises sing-box, refreshes subscriptions at startup and every two
-hours, and optionally measures and selects proxy paths. It starts the saved
-`/data/sing.json` before refreshing. `/reload` sends SIGHUP: reloads use cached
-subscriptions and current settings without fetching providers.
+The manager supervises sing-box, refreshes subscriptions at startup and on each
+provider's schedule, and optionally measures and selects proxy paths. It starts
+the saved `/data/sing.json` before refreshing. `/reload` sends SIGHUP and renders
+with cached subscriptions and current settings.
+
+Run `docker compose exec sing-tun /refresh` to queue an immediate fetch of all
+configured subscriptions, including any edited URLs, without restarting the container.
+The command sends SIGUSR1. Follow `docker compose logs -f sing-tun` for
+`provider_refreshed` or `provider_refresh_failed` and the activation result.
 
 Private inputs are read-only under `/config`: `sing.jsonnet`, `config.jsonnet`,
 and optional `local-subs-config.json` and `local-manager.json`. The manager renders
@@ -52,7 +57,7 @@ Settings are validated on load. Cadences/deadlines below are positive seconds.
 | `outbound_providers` | `{}` | Exact outbound-tag → logical provider name; group derived/local paths under one shared shortlist and rotation budget without changing their traffic paths or measurement identities |
 | `selector_provider_weights` | `{}` | Per-selector maps of provider weights, overriding the default weight for that selector only; measurements stay shared |
 | `selector_priorities` | `{}` | Ordered provider tiers per selector; omitted selectors use score alone |
-| `refresh_seconds` | 7200 | Subscription refresh interval |
+| `refresh_seconds` | 7200 | Default refresh interval and cap on provider-advertised intervals |
 | `revision_timeout` | 30 | Core revision verification deadline |
 | `shutdown_timeout` | 10 | Graceful child stop before forced termination |
 | `bootstrap_backoff_seconds` | 5 | Initial retry delay |
@@ -90,6 +95,16 @@ without the privilege to bind use normal routing.
 Subscription specs retain the existing format; provider prefixes must be unique
 (a missing prefix is `''`, as in `sing-subs`). Local proxy leaves are discovered from the rendered graph;
 direct/block/DNS entries are excluded. Protocols have no special preference.
+
+Each subscription in `local-subs-config.json` can set `refresh_seconds` to a
+positive number of seconds. That value takes precedence. Otherwise, the manager
+uses the smaller of the global `refresh_seconds` and the subscription's
+`Profile-Update-Interval` HTTP response header, which is given in whole hours.
+A missing or invalid header uses the global interval. Failed fetches retain the
+last good snapshot and its advertised interval, if available. Each subscription
+is scheduled from its last fetch attempt. `/reload` recalculates the schedule
+when the settings change, and `/refresh` fetches all providers regardless of
+their deadlines.
 
 Each subscription may set a private `headers` object, for example
 `"headers": {"User-Agent": "ExampleClient/1.0", "x-hwid": "stable-device-id-123", "x-device-os": "Linux"}`.
